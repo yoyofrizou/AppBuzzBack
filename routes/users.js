@@ -65,7 +65,6 @@ router.post("/signin", (req, res) => {
   });
 });
 
-
 router.delete("/delete/:token", (req, res) => {
   // On utilise le token passé dans l'URL (params) pour savoir qui supprimer
   User.deleteOne({ token: req.params.token }).then((data) => {
