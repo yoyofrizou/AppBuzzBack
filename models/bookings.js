@@ -2,6 +2,7 @@
 
 const bookingSchema = mongoose.Schema({
   message: String,
+  status : String,
   rides: { type: mongoose.Schema.Types.ObjectId, ref: "rides" },
   users: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
 });

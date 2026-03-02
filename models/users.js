@@ -7,7 +7,6 @@ const carSchema = mongoose.Schema({
  nbSeats: Number,
  licencePlate: { 
     type: String, 
-    required: true, // Empêche de créer une voiture sans plaque
     uppercase: true, // Transforme automatiquement "ab-123-cd" en "AB-123-CD"
     trim: true      // Enlève les espaces inutiles avant ou après
  }
@@ -15,6 +14,7 @@ const carSchema = mongoose.Schema({
 
 const userSchema = mongoose.Schema({
   firstname: String,
+  lastname: String,
   username: String,
   password: String,
   email: String,
