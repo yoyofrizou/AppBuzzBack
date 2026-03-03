@@ -4,16 +4,16 @@ const Conversation = require("../models/conversations");     //importe le modèl
 
 // 🔹 Créer ou récupérer une conversation
 router.post("/", async (req, res) => {      //crée une route HTTP de type POST, req = la requête envoyée par le frontend et res = la réponse qu’on va renvoyer
-  try {
-    const { tripId, driverId, passengerId } = req.body;
+  try {       //try/catch pour éviter que l’app crash
+    const { tripId, driverId, passengerId } = req.body;     //lit les données envoyées en JSON par le frontend
 
-    if (!tripId || !driverId || !passengerId) {
-      return res.status(400).json({ error: "tripId, driverId et passengerId requis" });
+    if (!tripId || !driverId || !passengerId) {     //vérifie que tous les champs existent, si un champ manque ca bloque
+      return res.status(400).json({ error: "tripId, driverId et passengerId requis" });   //sans return, le code continuerait
     }
 
-    let conversation = await Conversation.findOne({ tripId, passengerId });
+    let conversation = await Conversation.findOne({ tripId, passengerId });   //demande à Mongo si il existe déjà une conversation avec ce tripId ET ce passengerId
 
-    if (!conversation) {
+    if (!conversation) {       // si la conversation n’existe pas alors on crée un document conversation vide
       conversation = await Conversation.create({
         tripId,
         driverId,
@@ -22,11 +22,12 @@ router.post("/", async (req, res) => {      //crée une route HTTP de type POST,
       });
     }
 
-    res.json(conversation);
+    res.json(conversation);     //le frontend reçoit la conversation + son _id
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });   //si une erreur arrive dans le try, on la capture ici.
   }
 });
+
 
 // 🔹 Lire une conversation
 router.get("/:id", async (req, res) => {
