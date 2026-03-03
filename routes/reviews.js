@@ -4,7 +4,7 @@ const Review = require("../models/reviews");
 const Ride = require("../models/rides");
 const User = require("../models/users");
 
-router.post("/add", (req, res) => {
+router.post("/add", async (req, res) => {
   if (!req.body.note || !req.body.message) {
     return res.json({
       result: false,
@@ -18,10 +18,28 @@ router.post("/add", (req, res) => {
     ride: req.body.ride,
     user: req.body.user,
   });
-  
-  newReview.save().then((data) => {
-    res.json({ result: true, review: data });
-  });
+
+  const review = await newReview.save()
+    res.json({ result: true, review: review });
+});
+
+router.get("/:token", async (req, res) => {
+  const user = await User.findOne({ token: req.params.token });
+  if (!user) {
+    return res.json({ result: false, error: "Review non trouvé" });
+  }
+  const reviews = await Review.find({ user: user._id })
+  .populate("ride","user",);
+  res.json({ result: true, reviews: reviews });
+});
+
+router.delete("/delete/:reviewId", async (req, res) => {
+  const reviews = await Review.deleteOne({ _id: req.params.reviewId });
+    if (reviews.deletedCount > 0) {
+      res.json({ result: true, message: "Review supprimé" });
+    } else {
+      res.json({ result: false, error: "Review non trouvé" });
+    }
 });
 
 module.exports = router;

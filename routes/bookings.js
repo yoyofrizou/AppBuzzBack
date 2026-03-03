@@ -8,8 +8,8 @@ const Ride = require("../models/rides");
 router.get("/", (req, res) => {
   Booking.find()
     .populate("user", "ride")
-    .then((data) => {
-      res.json({ result: true, bookings: data });
+    .then((getBookings) => {
+      res.json({ result: true, bookings: getBookings });
     });
 });
 
@@ -20,8 +20,8 @@ router.get("/:token", (req, res) => {
     }
     Booking.find({ user: user._id })
       .populate("user", "ride")
-      .then((data) => {
-        res.json({ result: true, bookings: data });
+      .then((getBookings) => {
+        res.json({ result: true, bookings: getBookings});
       });
   });
 });
@@ -71,6 +71,5 @@ router.put("/updateStatus", (req, res) => {
   });
 });
 
-// commentaire testt
 
 module.exports = router;
