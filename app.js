@@ -11,6 +11,7 @@ var usersRouter = require('./routes/users');
 var bookingRouter = require('./routes/bookings');
 var reviewRouter = require('./routes/reviews');
 var rideRouter = require('./routes/rides');
+var conversationsRouter = require('./routes/conversations');
 
 var app = express();
 
@@ -28,5 +29,6 @@ app.use('/users', usersRouter);
 app.use('/bookings', bookingRouter);
 app.use('/rides', rideRouter);
 app.use('/reviews', reviewRouter);
+app.use('/conversations', conversationsRouter);
 
 module.exports = app;
