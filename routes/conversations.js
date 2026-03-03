@@ -2,7 +2,6 @@ var express = require("express");
 var router = express.Router();
 const Conversation = require("../models/conversations");     //importe le modèle Conversation
 
-
 // 🔹 Créer ou récupérer une conversation
 router.post("/", async (req, res) => {      //crée une route HTTP de type POST, req = la requête envoyée par le frontend et res = la réponse qu’on va renvoyer
   try {
@@ -28,7 +27,6 @@ router.post("/", async (req, res) => {      //crée une route HTTP de type POST,
     res.status(500).json({ error: err.message });
   }
 });
-
 
 // 🔹 Lire une conversation
 router.get("/:id", async (req, res) => {
