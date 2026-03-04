@@ -60,6 +60,11 @@ router.get("/:token", async (req, res) => {
       res.json({ result: true, rides: ride });
 });
 
+router.get("/", async (req, res) => {
+ const rides = await Ride.find().populate("user", "username");
+  res.json({ result: true, rides });
+});
+
 router.delete("/delete/:rideId", async (req, res) => {     
   const ride = await Ride.deleteOne({ _id: req.params.rideId })
     if (ride.deletedCount > 0) { 
