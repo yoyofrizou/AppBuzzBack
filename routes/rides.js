@@ -2,10 +2,19 @@ const express = require('express');     //librairie qui permet de creer des rout
 const router = express.Router();       //va contenir toutes les routes liées aux rides et sera branche dans app.js
 const Ride = require("../models/rides");   // import du modele Ride pour pouvoir creer un trajet, lire un trajet ou supprimer un trajet
 const User = require("../models/users");   //pour retrouver un utilisateur avec son token
+const Booking = require("../models/bookings");
 
 router.post("/add", async (req, res) => {   //l’URL finale est POST /rides/add
-  if (!req.body.departure || !req.body.arrival || !req.body.date || !req.body.price || !req.body.placeAvailable || !req.body.user || !req.body.driver ) {
-                            //verifie que tous les champs sont présents, si le champ est vide, undefined ou null alors ca bloque
+  if (
+  !req.body.departure ||
+  !req.body.arrival ||
+  !req.body.date ||
+  !req.body.price ||
+  !req.body.placesTotal ||
+  !req.body.totalCost ||
+  !req.body.user ||
+  !req.body.driver
+) {    //verifie que tous les champs sont présents, si le champ est vide, undefined ou null alors ca bloque
     return res.json({
       result: false,
       error: "Remplir tous les champs.",   //manque qq chose
@@ -30,12 +39,12 @@ router.post("/add", async (req, res) => {   //l’URL finale est POST /rides/add
     arrival: req.body.arrival,
     date: req.body.date,
     price: req.body.price,
-    placeAvailable: req.body.placeAvailable,
 
     // ajouts margaux nécessaires au paiement simulé
     placesTotal: placesTotal,
     placesLeft: placesTotal,
     totalCost: totalCost,
+    status: "open",
 
     user: req.body.user,
     driver: req.body.driver,    //stocke les références MongoDB
@@ -65,6 +74,57 @@ router.delete("/delete/:rideId", async (req, res) => {     //supprime un ride pa
     } else {
       res.json({ result: false, error: "Trajet non trouvé" });
     }
+});
+
+router.post("/:id/start", async (req, res) => {
+  const ride = await Ride.findById(req.params.id);
+
+  if (!ride) {
+    return res.json({ result: false, error: "Ride introuvable" });
+  }
+
+  if (ride.status !== "open") {
+    return res.json({ result: false, error: "Ride non démarrable" });
+  }
+
+  const bookings = await Booking.find({
+    ride: ride._id,
+    status: "authorized",
+  });
+
+  if (bookings.length === 0) {
+    return res.json({ result: false, error: "Aucun passager" });
+  }
+
+  // ✅ n = total de places réservées (multi-places)
+  let n = 0;
+  for (let b of bookings) {
+    n += b.seatsBooked;
+  }
+
+  if (n <= 0) {
+    return res.json({ result: false, error: "Nombre de places réservées invalide" });
+  }
+
+ // prix final par place : totalCost / (n + conducteur)
+  const finalAmountPerSeat = Math.floor(ride.totalCost / (n + 1));
+
+   // chaque booking paie seatsBooked * finalAmountPerSeat
+  for (let b of bookings) {
+    b.status = "captured";
+    b.finalAmount = finalAmountPerSeat * b.seatsBooked;
+    await b.save();
+  }
+
+  ride.status = "started";
+  await ride.save();
+
+  res.json({
+    result: true,
+    message: "Trajet démarré : prix final calculé (simulation)",
+    seatsBookedTotal: n,
+    finalAmountPerSeat: finalAmountPerSeat,
+  });
 });
 
 module.exports = router;

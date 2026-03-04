@@ -9,8 +9,16 @@ const bookingSchema = mongoose.Schema({
       index: true,
     },
     //lien vers ride + user
-  ride: { type: mongoose.Schema.Types.ObjectId, ref: "rides" },
+  ride: { type: mongoose.Schema.Types.ObjectId, ref: "rides", index: true },
   user: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
+
+  // nombre de places réservées
+  seatsBooked: {
+    type: Number,
+    required: true,
+    min: 1,
+    default: 1
+  },
 
   //simulation paiement
  maxAmount: { type: Number, required: true, min: 1 },      // centimes
