@@ -40,12 +40,12 @@ router.post("/add", async (req, res) => {
     arrival: req.body.arrival,
     date: req.body.date,
     price: req.body.price,
-    placeAvailable: req.body.placeAvailable,
 
     // ajouts margaux nécessaires au paiement simulé
     placesTotal: placesTotal,
     placesLeft: placesTotal,
     totalCost: totalCost,
+    status: "open",
 
     user: req.body.user,
     // driver: req.body.driver,    //stocke les références MongoDB
