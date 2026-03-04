@@ -45,22 +45,19 @@ router.post("/add", async (req, res) => {   //l’URL finale est POST /rides/add
     res.json({ result: true, ride: ride });   //renvoie le ride créé au frontend
 });
 
-router.get("/:token", async (req, res) => {     //Route dynamique, ex : GET /rides/abc123token
-  const user = await User.findOne({ token: req.params.token }); // cherche l’utilisateur avec ce token
+router.get("/:token", async (req, res) => {    
+  const user = await User.findOne({ token: req.params.token }); 
     if (!user) {
       return res.json({ result: false, error: "Trajet non trouvé" });
     }
-    const ride = await Ride.find({ user: user._id })    //récupère tous les rides créés par cet utilisateur
+    const ride = await Ride.find({ user: user._id })   
       res.json({ result: true, rides: ride });
 });
 
 
-router.delete("/delete/:rideId", async (req, res) => {     //supprime un ride par son ID
-  const ride = await Ride.deleteOne({ _id: req.params.rideId })    //supprime en BBD, Mongo ne renvoie pas le ride supprimé, il renvoie un résultat qui indique ce qui s’est passé
-                                                                  //Mongo renvoie un objet comme ceci { "acknowledged": true, "deletedCount": 1}
-    if (ride.deletedCount > 0) {       //“Est-ce que Mongo a vraiment supprimé quelque chose ?”
-                                      // deletedCount signifie combien de documents ont été supprimés donc if “Si au moins un ride a été supprimé”
-                                       // 1 > 0 → true alors le code entre dans le if, resultat = trajet supp
+router.delete("/delete/:rideId", async (req, res) => {     
+  const ride = await Ride.deleteOne({ _id: req.params.rideId })
+    if (ride.deletedCount > 0) { 
       res.json({ result: true, message: "Trajet supprimé" });
     } else {
       res.json({ result: false, error: "Trajet non trouvé" });
