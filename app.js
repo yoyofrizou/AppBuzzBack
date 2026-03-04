@@ -15,8 +15,12 @@ var conversationsRouter = require('./routes/conversations');
 
 var app = express();
 
+const fileUpload = require("express-fileupload");
+
 const cors = require('cors');
 app.use(cors());
+
+app.use(fileUpload());
 
 app.use(logger('dev'));
 app.use(express.json());
