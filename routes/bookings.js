@@ -26,14 +26,16 @@ router.get("/:token", (req, res) => {
   });
 });
 
-router.post("/add", (req, res) => {       //crée une route POST donc on envoie des donnees, add c est le chemin dans ce fichier, URL POST /bookings/add
-  User.findOne({ token: req.body.token }).then((user) => {      //cherche un seul utilisateur, celui dont le champ token correspond à ce que l’app a envoyé, quand MongoDB a fini, il donne le résultat dans user
+router.post("/add", async(req, res) => {       //crée une route POST donc on envoie des donnees, add c est le chemin dans ce fichier, URL POST /bookings/add
+
+  
+  const user = await User.findOne({ token: req.body.token });  //cherche un seul utilisateur, celui dont le champ token correspond à ce que l’app a envoyé, quand MongoDB a fini, il donne le résultat dans user
                                    //Parce que tu veux réserver en sachant qui réserve, donc tu identifies l’utilisateur
     if (!user) {          //Mongo n’a rien trouvé donc user vaut null
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
-     Ride.findById(req.body.ride).then((ride) => {        //cherche le trajet par son _id
+    const ride = await Ride.findById(req.body.ride);       //cherche le trajet par son _id
                                                        //Parce que la réservation doit être liée à un trajet précis
       if (!ride) {         //si l’ID est faux ou supprimé alors Mongo renvoie null
         return res.json({ result: false, error: "Trajet non trouvé" });
@@ -45,7 +47,7 @@ router.post("/add", (req, res) => {       //crée une route POST donc on envoie 
       }
 
        // nombre de places demandées (par défaut 1)
-      const seatsBooked = req.body.seatsBooked ? Number(req.body.seatsBooked) : 1;   // req ce que le frontend envoie dans le body JSON, et transforme ce que le frontend envoie en nombre car souvent les formulaires envoient des strings
+      const seatsBooked = Number(req.body.seatsBooked) || 1;   // req ce que le frontend envoie dans le body JSON, et transforme ce que le frontend envoie en nombre car souvent les formulaires envoient des strings
                                     /*si req.body.seatsBooked est absent → Number(undefined) → NaN → donc on prend 1
                                     si req.body.seatsBooked vaut "abc" → Number("abc") → NaN → donc on prend 1
                                     donc si le front n’envoie rien ou envoie un truc mauvais, on réserve 1 place par défaut*/
@@ -53,44 +55,49 @@ router.post("/add", (req, res) => {       //crée une route POST donc on envoie 
         return res.json({ result: false, error: "Nombre de places invalide" });
       }
 
-      if (ride.placesLeft <= 0) {       //impossible de dépasser le nombre de places
-        return res.json({ result: false, error: "Plus de places disponibles" });
-      }
+      if (ride.placesLeft < seatsBooked) {
+    return res.json({ result: false, error: "Pas assez de places disponibles" });
+     }
 
-      // 💰 simulation préautorisation (pire cas = 1 passager)
-      const pricePerSeatMax = Math.floor(ride.totalCost / 2);
-      const maxAmount = pricePerSeatMax * seatsBooked; //coût total du trajet (en centimes)
-                                                   // / 2 : pire cas = 1 seul passager + le conducteur → partage en 2
-                                                   //Math.floor() : on arrondit à l’entier inférieur, pas de centimes avec virgule
-                                                   //Parce qu’au moment de la réservation, on ne sait pas combien de passagers il y aura au final donc on “bloque” virtuellement le maximum possible : preauthorisation
-    });
+      // préautorisation simulée
+  const maxAmount = ride.price * seatsBooked;
 
     const newBooking = new Booking({    //crée un nouveau document Booking en memoire
       message: req.body.message,         //stocke un message optionnel
-      status: req.body.status || "authorized", //force le statut à "authorized", qui ici veut dire : réservation créée + préautorisation simulée faite
+      status: "authorized", //force le statut à "authorized", qui ici veut dire : réservation créée + préautorisation simulée faite
+      ride: ride._id,
       user: user._id,
       seatsBooked: seatsBooked,
       maxAmount: maxAmount,
       finalAmount: null,
     });
-    newBooking.save().then((savedBooking) => {
- // retirer une place dans le ride
-        ride.placesLeft = ride.placesLeft - 1;
-       ride.save().then(() => {
+
+  try {
+     const savedBooking = await newBooking.save();
+       ride.placesLeft = ride.placesLeft - seatsBooked;
+       await ride.save();
           res.json({
             result: true,
             booking: savedBooking,
-            seatsBooked: seatsBooked,
             maxAmount: maxAmount,
             message: "Préautorisation simulée effectuée"
     });
-        });
-
-      });
-
+    
+    } catch (err) {
+  if (err.code === 11000) {
+    return res.json({
+      result: false,
+      error: "Vous avez déjà réservé ce trajet"
     });
+  }
 
+  res.json({
+    result: false,
+    error: "Erreur lors de la réservation"
   });
+ }
+});
+  
 
 router.delete("/delete/:bookingId", (req, res) => {
   // On utilise le token passé dans l'URL (params) pour savoir qui supprimer

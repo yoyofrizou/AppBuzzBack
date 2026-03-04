@@ -4,7 +4,7 @@ const rideSchema = mongoose.Schema({
   departure: String,
   arrival: String,
   date: Date,
-  price: String,   //price en String c'est pas pratique pour calculer
+  price: { type: Number, required: true },  //price en String c'est pas pratique pour calculer, prix par passager fixé par le conducteur
 
   placesTotal: { type: Number, required: true, min: 1 },
   placesLeft: { type: Number, required: true, min: 0 },   //places en Number (au lieu de String)

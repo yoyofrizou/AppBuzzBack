@@ -11,7 +11,6 @@ router.post("/add", async (req, res) => {   //l’URL finale est POST /rides/add
   !req.body.date ||
   !req.body.price ||
   !req.body.placesTotal ||
-  !req.body.totalCost ||
   !req.body.user ||
   !req.body.driver
 ) {    //verifie que tous les champs sont présents, si le champ est vide, undefined ou null alors ca bloque
@@ -22,44 +21,50 @@ router.post("/add", async (req, res) => {   //l’URL finale est POST /rides/add
   }
 
     // ajout margo : vérifier totalCost (centimes)
-  const placesTotal = Number(req.body.placesTotal);   //transforme la valeur envoyée en Number car souvent envoyee par le front en string
-  const totalCost = Number(req.body.totalCost);      //pareil
+ const price = Number(req.body.price); 
+ const placesTotal = Number(req.body.placesTotal);
+
+ if (!price || price <= 0) {
+    return res.json({ result: false, error: "Prix invalide" });
+  }
 
   if (!placesTotal || placesTotal <= 0) {      //verifie que placesTotal est un nombre valide et positif
                                               //placesTotal <= 0 verifie si 0 ou negatif
     return res.json({ result: false, error: "placesTotal invalide" });
   }
 
-  if (!totalCost || totalCost <= 0) {
-    return res.json({ result: false, error: "totalCost invalide" });
-  }
+  // calcul automatique du coût total (conducteur + 1 passager au pire cas)
+  const totalCost = price * 2;
 
   const newRide = new Ride({          //nouvelle instance du modèle Ride
     departure: req.body.departure,     //récupère les valeurs envoyées par le frontend
     arrival: req.body.arrival,
     date: req.body.date,
-    price: req.body.price,
+    
+     price: price,
 
     // ajouts margaux nécessaires au paiement simulé
     placesTotal: placesTotal,
     placesLeft: placesTotal,
+
     totalCost: totalCost,
+
     status: "open",
 
     user: req.body.user,
     driver: req.body.driver,    //stocke les références MongoDB
   });
   
-  const ride = await newRide.save()           //enregistre le ride en base
+  const ride = await newRide.save();          //enregistre le ride en base
     res.json({ result: true, ride: ride });   //renvoie le ride créé au frontend
 });
 
 router.get("/:token", async (req, res) => {     //Route dynamique, ex : GET /rides/abc123token
   const user = await User.findOne({ token: req.params.token }); // cherche l’utilisateur avec ce token
     if (!user) {
-      return res.json({ result: false, error: "Trajet non trouvé" });
+      return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
-    const ride = await Ride.find({ user: user._id })    //récupère tous les rides créés par cet utilisateur
+    const ride = await Ride.find({ user: user._id });    //récupère tous les rides créés par cet utilisateur
       res.json({ result: true, rides: ride });
 });
 
@@ -96,23 +101,22 @@ router.post("/:id/start", async (req, res) => {
     return res.json({ result: false, error: "Aucun passager" });
   }
 
-  // ✅ n = total de places réservées (multi-places)
+ // calcul du nombre total de passagers
   let n = 0;
   for (let b of bookings) {
     n += b.seatsBooked;
   }
 
+  const finalPricePerSeat = Math.floor(ride.totalCost / (n + 1));
+
   if (n <= 0) {
     return res.json({ result: false, error: "Nombre de places réservées invalide" });
   }
 
- // prix final par place : totalCost / (n + conducteur)
-  const finalAmountPerSeat = Math.floor(ride.totalCost / (n + 1));
-
-   // chaque booking paie seatsBooked * finalAmountPerSeat
+   // chaque booking paie seatsBooked * finalPricePerSeat
   for (let b of bookings) {
     b.status = "captured";
-    b.finalAmount = finalAmountPerSeat * b.seatsBooked;
+    b.finalAmount = finalPricePerSeat * b.seatsBooked;
     await b.save();
   }
 
@@ -121,9 +125,9 @@ router.post("/:id/start", async (req, res) => {
 
   res.json({
     result: true,
-    message: "Trajet démarré : prix final calculé (simulation)",
-    seatsBookedTotal: n,
-    finalAmountPerSeat: finalAmountPerSeat,
+    passengers: n,
+    pricePerSeat: finalPricePerSeat,
+    message: "Prix final calculé"
   });
 });
 
