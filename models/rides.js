@@ -19,13 +19,8 @@ const rideSchema = mongoose.Schema({
       index: true,
     },
 
-<<<<<<< HEAD
   user: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
   // driver: { type: mongoose.Schema.Types.ObjectId, ref: "drivers" },
-=======
-  user: { type: mongoose.Schema.Types.ObjectId, ref: "users", index: true, },
-  driver: { type: mongoose.Schema.Types.ObjectId, ref: "drivers", index: true, },
->>>>>>> d1187c170e1b9d9fb81422d30637f343a8ed57d0
 },
 { timestamps: true }
 );
