@@ -35,14 +35,9 @@ router.post("/add", async(req, res) => {       //crée une route POST donc on en
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
-<<<<<<< HEAD
     const ride = await Ride.findById(req.body.ride);       //cherche le trajet par son _id
                                                        //Parce que la réservation doit être liée à un trajet précis
       if (!ride) {         //si l’ID est faux ou supprimé alors Mongo renvoie null
-=======
-    Ride.findById(req.body.ride).then((ride) => {
-      if (!ride) {
->>>>>>> 61fd68d83b0a561a683436674ea220f1af284f48
         return res.json({ result: false, error: "Trajet non trouvé" });
       }
 
