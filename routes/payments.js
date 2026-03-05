@@ -3,7 +3,7 @@ const router = express.Router();
 const Stripe = require("stripe");
 const User = require("../models/users");
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+/*const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
@@ -139,6 +139,6 @@ router.post("/cancel", async (req, res) => {
   } catch (err) {
     res.json({ result: false, error: err.message });
   }
-});
+});*/
 
 module.exports = router;
