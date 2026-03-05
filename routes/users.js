@@ -41,7 +41,7 @@ router.post("/signup", (req, res) => {
         email: req.body.email,
         password: hash,
         token: uid2(32),
-          car: req.body.licencePlate
+        car: req.body.licencePlate
           ? {
               brand: req.body.brand,
               model: req.body.model,
@@ -50,11 +50,15 @@ router.post("/signup", (req, res) => {
               licencePlate: req.body.licencePlate,
             }
           : null,
-          // si licencePlate est fourni, il enregistre la voiture, sinon null
+        // si licencePlate est fourni, il enregistre la voiture, sinon null
       });
 
       newUser.save().then((newDoc) => {
-        res.json({ result: true, token: newDoc.token, user: { _id: newDoc._id, email: newDoc.email } });
+        res.json({
+          result: true,
+          token: newDoc.token,
+          user: { _id: newDoc._id, email: newDoc.email },
+        });
       });
     } else {
       // User already exists in database
@@ -69,9 +73,20 @@ router.post("/signin", (req, res) => {
     return;
   }
 
-  User.findOne({ email: req.body.email}).then((data) => {
+  User.findOne({ email: req.body.email }).then((data) => {
     if (data && bcrypt.compareSync(req.body.password, data.password)) {
-      res.json({ result: true, token: data.token, user: { _id: data._id, email: data.email }});
+      res.json({
+        result: true,
+        token: data.token,
+        user: {
+          _id: data._id,
+          email: data.email,
+          firstname: data.firstname,
+          lastname: data.lastname,
+          username: data.username,
+          car: data.car,
+        },
+      });
     } else {
       res.json({ result: false, error: "User not found or wrong password" });
     }
@@ -143,7 +158,6 @@ router.post("/upload", async (req, res) => {
   } else {
     res.json({ result: false, error: resultMove });
   }
-  
 });
 
 module.exports = router;
