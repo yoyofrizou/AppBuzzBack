@@ -68,12 +68,12 @@ router.post("/signup", (req, res) => {
 });
 
 router.post("/signin", (req, res) => {
-  if (!checkBody(req.body, ["email", "password"])) {
+  if (!checkBody(req.body, ["username", "password"])) {
     res.json({ result: false, error: "Missing or empty fields" });
     return;
   }
 
-  User.findOne({ email: req.body.email }).then((data) => {
+  User.findOne({ username: req.body.username }).then((data) => {
     if (data && bcrypt.compareSync(req.body.password, data.password)) {
       res.json({
         result: true,
@@ -85,6 +85,7 @@ router.post("/signin", (req, res) => {
           lastname: data.lastname,
           username: data.username,
           car: data.car,
+          photos: data.photos,
         },
       });
     } else {
@@ -147,17 +148,25 @@ router.post("/addCar", (req, res) => {
   });
 });
 
-router.post("/upload", async (req, res) => {
+router.post("/upload", (req, res) => {
   const photoPath = `./tmp/${uniqid()}.jpg`;
-  const resultMove = await req.files.photoFromFront.mv(photoPath);
+  console.log("token reçu :", req.body.token); // 👈
+  console.log("fichier reçu :", req.files?.photoFromFront); // 👈
 
-  if (!resultMove) {
-    const resultCloudinary = await cloudinary.uploader.upload(photoPath);
-    fs.unlinkSync(photoPath);
-    res.json({ result: true, url: resultCloudinary.secure_url });
-  } else {
-    res.json({ result: false, error: resultMove });
-  }
+  req.files.photoFromFront.mv(photoPath).then(() => {
+    cloudinary.uploader.upload(photoPath).then((resultCloudinary) => {
+      fs.unlinkSync(photoPath); // On cherche l'utilisateur grâce à son token
+      User.findOne({ token: req.body.token }).then((user) => {
+        console.log("user trouvé :", user); // 👈
+        // On ajoute la nouvelle URL à la fin du tableau photos existant
+        user.photos = [...user.photos, resultCloudinary.secure_url];
+        // On sauvegarde l'utilisateur avec la nouvelle photo
+        user.save().then(() => {
+          res.json({ result: true, url: resultCloudinary.secure_url });
+        });
+      });
+    });
+  });
 });
 
 module.exports = router;

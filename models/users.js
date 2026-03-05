@@ -21,6 +21,7 @@ const userSchema = mongoose.Schema({
   email: String,
   token: String,
   car: carSchema,
+  photos: [String], // pour upload les photos
 });
 
 const User = mongoose.model('users', userSchema);
