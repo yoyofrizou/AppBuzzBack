@@ -6,6 +6,7 @@ const Booking = require("../models/bookings");
 
 router.post("/add", async (req, res) => {
   if (
+<<<<<<< HEAD
   !req.body.departure ||
   !req.body.arrival ||
   !req.body.date ||
@@ -14,6 +15,15 @@ router.post("/add", async (req, res) => {
   !req.body.user ||
   !req.body.driver
 ) {    //verifie que tous les champs sont présents, si le champ est vide, undefined ou null alors ca bloque
+=======
+    !req.body.departure ||
+    !req.body.arrival ||
+    !req.body.date ||
+    !req.body.price ||
+    !req.body.placeAvailable ||
+    !req.body.user
+  ) {
+>>>>>>> 46d2818e16630cbeb07b9ba11163c1eead6baebe
     return res.json({
       result: false,
       error: "Remplir tous les champs.", 
@@ -57,6 +67,7 @@ router.post("/add", async (req, res) => {
   
   const ride = await newRide.save();          //enregistre le ride en base
     res.json({ result: true, ride: ride });   //renvoie le ride créé au frontend
+<<<<<<< HEAD
 });
 
 router.get("/search", async (req, res) => {
@@ -89,6 +100,8 @@ router.get("/search", async (req, res) => {
     rides: rides
   });
 
+=======
+>>>>>>> 46d2818e16630cbeb07b9ba11163c1eead6baebe
 });
 
 router.get("/:token", async (req, res) => {    

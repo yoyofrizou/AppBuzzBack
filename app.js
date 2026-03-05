@@ -13,10 +13,16 @@ var reviewRouter = require('./routes/reviews');
 var rideRouter = require('./routes/rides');
 var conversationsRouter = require('./routes/conversations');
 
+var paymentsRouter = require("./routes/payments");
+
 var app = express();
+
+const fileUpload = require("express-fileupload");
 
 const cors = require('cors');
 app.use(cors());
+
+app.use(fileUpload());
 
 app.use(logger('dev'));
 app.use(express.json());
@@ -30,5 +36,7 @@ app.use('/bookings', bookingRouter);
 app.use('/rides', rideRouter);
 app.use('/reviews', reviewRouter);
 app.use('/conversations', conversationsRouter);
+
+app.use("/payments", paymentsRouter);
 
 module.exports = app;
