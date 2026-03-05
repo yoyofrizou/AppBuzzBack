@@ -19,7 +19,7 @@ router.get("/:token", (req, res) => {
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
     Booking.find({ user: user._id })
-      .populate("user", "ride")
+      .populate("ride")
       .then((getBookings) => {
         res.json({ result: true, bookings: getBookings });
       });
