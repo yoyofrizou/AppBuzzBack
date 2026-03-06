@@ -19,10 +19,25 @@ const bookingSchema = mongoose.Schema({
     min: 1,
     default: 1
   },
+ // paiement Stripe
+  paymentIntentId: {
+    type: String,
+    default: null
+  },
 
-  //simulation paiement
- maxAmount: { type: Number, required: true, min: 1 },      // montant pre autorise en centimes
- finalAmount: { type: Number, default: null, min: 0 },
+  // montant préautorisé (hold)
+  maxAmount: {
+    type: Number,
+    required: true,
+    min: 1
+  },
+
+  // montant réellement débité à la fin
+  finalAmount: {
+    type: Number,
+    default: null,
+    min: 0
+  }
 },
 { timestamps: true }
 );

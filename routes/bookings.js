@@ -1,9 +1,14 @@
 var express = require("express");
 var router = express.Router();
+const Stripe = require("stripe");
 
 const Booking = require("../models/bookings");
 const User = require("../models/users");
 const Ride = require("../models/rides");
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
+});
 
 router.get("/", (req, res) => {
   Booking.find()
@@ -64,6 +69,31 @@ router.post("/add", async(req, res) => {       //crée une route POST donc on en
       // préautorisation simulée
   const maxAmount = ride.price * seatsBooked;
 
+   // Vérifie si carte enregistrée
+  if (!user.stripeCustomerId || !user.defaultPaymentMethodId) {
+    return res.json({
+      result: false,
+      error: "Aucune carte enregistrée. Va dans Profil > Paiement.",
+    });
+  }
+
+  try {
+    // 1) Stripe HOLD (manual capture)
+    const pi = await stripe.paymentIntents.create({
+      amount: maxAmount,
+      currency: "eur",
+      customer: user.stripeCustomerId,
+      payment_method: user.defaultPaymentMethodId,
+      capture_method: "manual", // hold
+      confirm: true,
+      off_session: true,
+      metadata: {
+        rideId: String(ride._id),
+        userId: String(user._id),
+        seatsBooked: String(seatsBooked),
+      },
+    });
+
     const newBooking = new Booking({    //crée un nouveau document Booking en memoire
       message: req.body.message,         //stocke un message optionnel
       status: "authorized", //force le statut à "authorized", qui ici veut dire : réservation créée + préautorisation simulée faite
@@ -72,9 +102,9 @@ router.post("/add", async(req, res) => {       //crée une route POST donc on en
       seatsBooked: seatsBooked,
       maxAmount: maxAmount,
       finalAmount: null,
+      paymentIntentId: pi.id, // stocke l’ID Stripe
     });
 
-  try {
      const savedBooking = await newBooking.save();
        ride.placesLeft = ride.placesLeft - seatsBooked;
        await ride.save();
@@ -82,7 +112,7 @@ router.post("/add", async(req, res) => {       //crée une route POST donc on en
             result: true,
             booking: savedBooking,
             maxAmount: maxAmount,
-            message: "Préautorisation simulée effectuée"
+            message: "Préautorisation Stripe effectuée (hold)",
     });
     
     } catch (err) {
@@ -93,6 +123,7 @@ router.post("/add", async(req, res) => {       //crée une route POST donc on en
     });
   }
 
+ // Stripe erreurs typiques (carte refusée, etc.)
   res.json({
     result: false,
     error: "Erreur lors de la réservation"
