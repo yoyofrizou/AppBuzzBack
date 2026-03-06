@@ -16,15 +16,15 @@ router.post("/add", async (req, res) => {
 ) {    //verifie que tous les champs sont présents, si le champ est vide, undefined ou null alors ca bloque
     return res.json({
       result: false,
-      error: "Remplir tous les champs.", 
+      error: "Remplir tous les champs.",
     });
   }
 
-    // ajout margo : vérifier totalCost (centimes)
- const price = Number(req.body.price); 
- const placesTotal = Number(req.body.placesTotal);
+  // ajout margo : vérifier totalCost (centimes)
+  const price = Number(req.body.price);
+  const placesTotal = Number(req.body.placesTotal);
 
- if (!price || price <= 0) {
+  if (!price || price <= 0) {
     return res.json({ result: false, error: "Prix invalide" });
   }
 
@@ -32,6 +32,11 @@ router.post("/add", async (req, res) => {
     //verifie que placesTotal est un nombre valide et positif
     //placesTotal <= 0 verifie si 0 ou negatif
     return res.json({ result: false, error: "placesTotal invalide" });
+  }
+  const user = await User.findOne({ token: req.body.user });
+
+  if (!user) {
+    return res.json({ result: false, error: "Utilisateur non trouvé" });
   }
 
   // calcul automatique du coût total (conducteur + 1 passager au pire cas)
@@ -41,8 +46,8 @@ router.post("/add", async (req, res) => {
     departure: req.body.departure,
     arrival: req.body.arrival,
     date: req.body.date,
-    
-     price: price,
+
+    price: price,
 
     // ajouts margaux nécessaires au paiement simulé
     placesTotal: placesTotal,
@@ -52,7 +57,8 @@ router.post("/add", async (req, res) => {
 
     status: "open",
 
-    user: req.body.user,
+    user: user._id,
+    car: user.car,
   });
   
   const ride = await newRide.save();          //enregistre le ride en base
@@ -60,14 +66,13 @@ router.post("/add", async (req, res) => {
 });
 
 router.get("/search", async (req, res) => {
-
-  const departure = req.query.departure;   // req.query car le frontend fera une requête comme : GET /rides/search?departure=Paris&arrival=Lyon
+  const departure = req.query.departure; // req.query car le frontend fera une requête comme : GET /rides/search?departure=Paris&arrival=Lyon
   const arrival = req.query.arrival;
   const date = req.query.date;
 
   const query = {
     status: "open",
-    placesLeft: { $gt: 0 }
+    placesLeft: { $gt: 0 },
   };
 
   if (departure) {
@@ -86,32 +91,31 @@ router.get("/search", async (req, res) => {
 
   res.json({
     result: true,
-    rides: rides
+    rides: rides,
   });
-
 });
 
-router.get("/:token", async (req, res) => {    
-  const user = await User.findOne({ token: req.params.token }); 
-    if (!user) {
-      return res.json({ result: false, error: "Utilisateur non trouvé" });
-    }
-    const ride = await Ride.find({ user: user._id });    //récupère tous les rides créés par cet utilisateur
-      res.json({ result: true, rides: ride });
+router.get("/:token", async (req, res) => {
+  const user = await User.findOne({ token: req.params.token });
+  if (!user) {
+    return res.json({ result: false, error: "Utilisateur non trouvé" });
+  }
+  const ride = await Ride.find({ user: user._id }); //récupère tous les rides créés par cet utilisateur
+  res.json({ result: true, rides: ride });
 });
 
 router.get("/", async (req, res) => {
- const rides = await Ride.find().populate("user", "username");
+  const rides = await Ride.find().populate("user", "firstname lastname car");
   res.json({ result: true, rides });
 });
 
-router.delete("/delete/:rideId", async (req, res) => {     
-  const ride = await Ride.deleteOne({ _id: req.params.rideId })
-    if (ride.deletedCount > 0) { 
-      res.json({ result: true, message: "Trajet supprimé" });
-    } else {
-      res.json({ result: false, error: "Trajet non trouvé" });
-    }
+router.delete("/delete/:rideId", async (req, res) => {
+  const ride = await Ride.deleteOne({ _id: req.params.rideId });
+  if (ride.deletedCount > 0) {
+    res.json({ result: true, message: "Trajet supprimé" });
+  } else {
+    res.json({ result: false, error: "Trajet non trouvé" });
+  }
 });
 
 router.post("/:id/start", async (req, res) => {
@@ -134,7 +138,7 @@ router.post("/:id/start", async (req, res) => {
     return res.json({ result: false, error: "Aucun passager" });
   }
 
- // calcul du nombre total de passagers
+  // calcul du nombre total de passagers
   let n = 0;
   for (let b of bookings) {
     n += b.seatsBooked;
@@ -143,10 +147,13 @@ router.post("/:id/start", async (req, res) => {
   const finalPricePerSeat = Math.floor(ride.totalCost / (n + 1));
 
   if (n <= 0) {
-    return res.json({ result: false, error: "Nombre de places réservées invalide" });
+    return res.json({
+      result: false,
+      error: "Nombre de places réservées invalide",
+    });
   }
 
-   // chaque booking paie seatsBooked * finalPricePerSeat
+  // chaque booking paie seatsBooked * finalPricePerSeat
   for (let b of bookings) {
     b.status = "captured";
     b.finalAmount = finalPricePerSeat * b.seatsBooked;
@@ -160,7 +167,7 @@ router.post("/:id/start", async (req, res) => {
     result: true,
     passengers: n,
     pricePerSeat: finalPricePerSeat,
-    message: "Prix final calculé"
+    message: "Prix final calculé",
   });
 });
 
