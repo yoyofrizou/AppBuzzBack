@@ -6,14 +6,14 @@ const Booking = require("../models/bookings");
 
 router.post("/add", async (req, res) => {
   if (
-  !req.body.departure ||
-  !req.body.arrival ||
-  !req.body.date ||
-  !req.body.price ||
-  !req.body.placesTotal ||
-  !req.body.user ||
-  !req.body.driver
-) {    //verifie que tous les champs sont présents, si le champ est vide, undefined ou null alors ca bloque
+    !req.body.departure ||
+    !req.body.arrival ||
+    !req.body.date ||
+    !req.body.price ||
+    !req.body.placesTotal ||
+    !req.body.user
+  ) {
+    //verifie que tous les champs sont présents, si le champ est vide, undefined ou null alors ca bloque
     return res.json({
       result: false,
       error: "Remplir tous les champs.",
@@ -60,9 +60,9 @@ router.post("/add", async (req, res) => {
     user: user._id,
     car: user.car,
   });
-  
-  const ride = await newRide.save();          //enregistre le ride en base
-    res.json({ result: true, ride: ride });   //renvoie le ride créé au frontend
+
+  const ride = await newRide.save(); //enregistre le ride en base
+  res.json({ result: true, ride: ride }); //renvoie le ride créé au frontend
 });
 
 router.get("/search", async (req, res) => {

@@ -20,5 +20,9 @@
     "stripe": "^20.4.0",
     "uid2": "^1.0.0",
     "uniqid": "^5.4.0"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0",
+    "supertest": "^7.2.2"
   }
 }
