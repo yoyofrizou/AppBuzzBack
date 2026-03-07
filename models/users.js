@@ -20,6 +20,11 @@ const userSchema = mongoose.Schema({
   password: String,
   email: String,
   token: String,
+
+  // Stripe
+  stripeCustomerId: { type: String, default: null },
+  defaultPaymentMethodId: { type: String, default: null },
+  
   car: carSchema,
   photos: [String], // pour upload les photos
 });
