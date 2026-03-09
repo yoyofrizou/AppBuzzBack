@@ -79,10 +79,10 @@ router.post("/attach-default-payment-method", async (req, res) => {
     user.defaultPaymentMethodId = paymentMethodId;
     await user.save();
 
-    res.json({ result: true, message: "Carte enregistrée et définie par défaut" });
-  } catch (err) {
-    res.json({ result: false, error: err.message });
-  }
+  res.json({
+  result: true,
+  message: "Carte enregistrée et définie par défaut",
+  defaultPaymentMethodId: paymentMethodId,
 });
 
 // 3) Préautorisation (PaymentIntent manual capture)
