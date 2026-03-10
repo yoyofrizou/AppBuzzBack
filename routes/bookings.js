@@ -10,116 +10,202 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
-router.get("/", (req, res) => {
-  Booking.find()
-    .populate("user", "ride")
-    .then((getBookings) => {
-      res.json({ result: true, bookings: getBookings });
-    });
+//
+// GET tous les bookings (utile debug)
+//
+router.get("/", async (req, res) => {
+  try {
+    const bookings = await Booking.find()
+      .populate("passenger", "firstname lastname username email")
+      .populate("ride");
+
+    res.json({ result: true, bookings });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
 });
 
-router.get("/:token", (req, res) => {
-  User.findOne({ token: req.params.token }).then((user) => {
+//
+// GET les bookings d’un utilisateur passager via son token
+//
+router.get("/:token", async (req, res) => {
+  try {
+    const user = await User.findOne({ token: req.params.token });
+
     if (!user) {
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
-    Booking.find({ user: user._id })
+
+    const bookings = await Booking.find({ passenger: user._id })
       .populate("ride")
-      .then((getBookings) => {
-        res.json({ result: true, bookings: getBookings });
-      });
-  });
+      .populate("passenger", "firstname lastname username email");
+
+    res.json({ result: true, bookings });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
 });
 
+//
+// POST créer une réservation passager
+// Stripe a déjà été appelé avant dans /payments/authorize-payment
+//
 router.post("/add", async (req, res) => {
-  //crée une route POST donc on envoie des donnees, add c est le chemin dans ce fichier, URL POST /bookings/add
-
-  const user = await User.findOne({ token: req.body.token }); //cherche un seul utilisateur, celui dont le champ token correspond à ce que l’app a envoyé, quand MongoDB a fini, il donne le résultat dans user
-  //Parce que tu veux réserver en sachant qui réserve, donc tu identifies l’utilisateur
-  if (!user) {
-    //Mongo n’a rien trouvé donc user vaut null
-    return res.json({ result: false, error: "Utilisateur non trouvé" });
-  }
-
-  const ride = await Ride.findById(req.body.ride); //cherche le trajet par son _id
-  //Parce que la réservation doit être liée à un trajet précis
-  if (!ride) {
-    //si l’ID est faux ou supprimé alors Mongo renvoie null
-    return res.json({ result: false, error: "Trajet non trouvé" });
-  }
-
-  if (ride.status !== "open") {
-    return res.json({
-      result: false,
-      error: "Le trajet n'est plus réservable",
-    });
-  }
-
-  // nombre de places demandées (par défaut 1)
-  const seatsBooked = Number(req.body.seatsBooked) || 1; // req ce que le frontend envoie dans le body JSON, et transforme ce que le frontend envoie en nombre car souvent les formulaires envoient des strings
-  /*si req.body.seatsBooked est absent → Number(undefined) → NaN → donc on prend 1
-                                    si req.body.seatsBooked vaut "abc" → Number("abc") → NaN → donc on prend 1
-                                    donc si le front n’envoie rien ou envoie un truc mauvais, on réserve 1 place par défaut*/
-  if (seatsBooked <= 0) {
-    //vérifie que le nombre est valide parce qu’un utilisateur ne doit pas pouvoir réserver 0 place ou un nombre negatif
-    return res.json({ result: false, error: "Nombre de places invalide" });
-  }
-
-  if (ride.placesLeft < seatsBooked) {
-    return res.json({
-      result: false,
-      error: "Pas assez de places disponibles",
-    });
-  }
-
-  // préautorisation simulée
-  const maxAmount = ride.price * seatsBooked;
-
-  // Vérifie si carte enregistrée
-  if (!user.stripeCustomerId || !user.defaultPaymentMethodId) {
-    return res.json({
-      result: false,
-      error: "Aucune carte enregistrée. Va dans Profil > Paiement.",
-    });
-  }
-
   try {
-    // 1) Stripe HOLD (manual capture)
-    const pi = await stripe.paymentIntents.create({
-      amount: maxAmount,
-      currency: "eur",
-      customer: user.stripeCustomerId,
-      payment_method: user.defaultPaymentMethodId,
-      capture_method: "manual", // hold
-      confirm: true,
-      off_session: true,
-      metadata: {
-        rideId: String(ride._id),
-        userId: String(user._id),
-        seatsBooked: String(seatsBooked),
-      },
+    const {
+      token,
+      ride: rideId,
+      seatsBooked,
+      message,
+      paymentIntentId,
+      maxAmount,
+    } = req.body;
+
+    if (!token || !rideId || !paymentIntentId || !maxAmount) {
+      return res.json({
+        result: false,
+        error: "Champs manquants",
+      });
+    }
+
+    const user = await User.findOne({ token });
+    if (!user) {
+      return res.json({ result: false, error: "Utilisateur non trouvé" });
+    }
+
+    var express = require("express");
+var router = express.Router();
+const Stripe = require("stripe");
+
+const Booking = require("../models/bookings");
+const User = require("../models/users");
+const Ride = require("../models/rides");
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
+});
+
+//
+// GET tous les bookings (utile debug)
+//
+router.get("/", async (req, res) => {
+  try {
+    const bookings = await Booking.find()
+      .populate("passenger", "firstname lastname username email")
+      .populate("ride");
+
+    res.json({ result: true, bookings });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
+});
+
+//
+// GET les bookings d’un utilisateur passager via son token
+//
+router.get("/:token", async (req, res) => {
+  try {
+    const user = await User.findOne({ token: req.params.token });
+
+    if (!user) {
+      return res.json({ result: false, error: "Utilisateur non trouvé" });
+    }
+
+    const bookings = await Booking.find({ passenger: user._id })
+      .populate("ride")
+      .populate("passenger", "firstname lastname username email");
+
+    res.json({ result: true, bookings });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
+});
+
+//
+// POST créer une réservation passager
+// Stripe a déjà été appelé avant dans /payments/authorize-payment
+//
+router.post("/add", async (req, res) => {
+  try {
+    const {
+      token,
+      ride: rideId,
+      seatsBooked,
+      message,
+      paymentIntentId,
+      maxAmount,
+    } = req.body;
+
+    if (!token || !rideId || !paymentIntentId || !maxAmount) {
+      return res.json({
+        result: false,
+        error: "Champs manquants",
+      });
+    }
+
+    const user = await User.findOne({ token });
+    if (!user) {
+      return res.json({ result: false, error: "Utilisateur non trouvé" });
+    }
+
+    const ride = await Ride.findById(rideId);
+    if (!ride) {
+      return res.json({ result: false, error: "Trajet non trouvé" });
+    }
+
+    if (ride.status !== "open") {
+      return res.json({
+        result: false,
+        error: "Le trajet n'est plus réservable",
+      });
+    }
+
+    const parsedSeatsBooked = Number(seatsBooked) || 1;
+
+    if (parsedSeatsBooked <= 0) {
+      return res.json({ result: false, error: "Nombre de places invalide" });
+    }
+
+    if (ride.placesLeft < parsedSeatsBooked) {
+      return res.json({
+        result: false,
+        error: "Pas assez de places disponibles",
+      });
+    }
+
+    const existingBooking = await Booking.findOne({
+      ride: ride._id,
+      passenger: user._id,
     });
+
+    if (existingBooking) {
+      return res.json({
+        result: false,
+        error: "Vous avez déjà réservé ce trajet",
+      });
+    }
 
     const newBooking = new Booking({
-      //crée un nouveau document Booking en memoire
-      message: req.body.message, //stocke un message optionnel
-      status: "authorized", //force le statut à "authorized", qui ici veut dire : réservation créée + préautorisation simulée faite
+      message: message || "",
+      bookingStatus: "pending",
+      paymentStatus: "authorized",
       ride: ride._id,
-      user: user._id,
-      seatsBooked: seatsBooked,
-      maxAmount: maxAmount,
+      passenger: user._id,
+      seatsBooked: parsedSeatsBooked,
+      maxAmount: Number(maxAmount),
       finalAmount: null,
-      paymentIntentId: pi.id, // stocke l’ID Stripe
+      paymentIntentId: paymentIntentId,
     });
 
     const savedBooking = await newBooking.save();
-    ride.placesLeft = ride.placesLeft - seatsBooked;
+
+    ride.placesLeft = ride.placesLeft - parsedSeatsBooked;
     await ride.save();
+
     res.json({
       result: true,
       booking: savedBooking,
-      maxAmount: maxAmount,
-      message: "Préautorisation Stripe effectuée (hold)",
+      message: "Réservation créée avec succès",
     });
   } catch (err) {
     if (err.code === 11000) {
@@ -129,39 +215,147 @@ router.post("/add", async (req, res) => {
       });
     }
 
-    // Stripe erreurs typiques (carte refusée, etc.)
     res.json({
       result: false,
-      error: "Erreur lors de la réservation",
+      error: err.message || "Erreur lors de la réservation",
     });
   }
 });
 
-router.delete("/delete/:bookingId", (req, res) => {
-  // On utilise le token passé dans l'URL (params) pour savoir qui supprimer
-  Booking.deleteOne({ _id: req.params.bookingId }).then((data) => {
-    // deletedCount vaut 1 si quelqu'un a été supprimé, 0 sinon
-    if (data.deletedCount > 0) {
-      res.json({ result: true, message: "Réservation supprimé avec succès" });
-    } else {
-      res.json({ result: false, error: "Réservation non trouvé" });
+//
+// DELETE supprimer une réservation
+//
+router.delete("/delete/:bookingId", async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.bookingId);
+
+    if (!booking) {
+      return res.json({ result: false, error: "Réservation non trouvée" });
     }
-  });
+
+    // Si paiement encore seulement autorisé, on annule la préautorisation
+    if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
+      try {
+        await stripe.paymentIntents.cancel(booking.paymentIntentId);
+      } catch (err) {
+        // on évite de tout casser si Stripe renvoie une erreur ici
+      }
+    }
+
+    const ride = await Ride.findById(booking.ride);
+    if (ride) {
+      ride.placesLeft = ride.placesLeft + booking.seatsBooked;
+      await ride.save();
+    }
+
+    await Booking.deleteOne({ _id: req.params.bookingId });
+
+    res.json({
+      result: true,
+      message: "Réservation supprimée avec succès",
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
 });
 
-// route qui sert à modifier le statut de la réservation, (accepter ou refuser)
-router.put("/updateStatus", (req, res) => {
-  // On cherche le booking par son ID envoyé dans le body
-  Booking.findById(req.body.bookingId).then((data) => {
-    if (data) {
-      data.status = req.body.status; // On met à jour le statut
-      data.save().then((updatedBooking) => {
-        res.json({ result: true, booking: updatedBooking });
-      });
-    } else {
-      res.json({ result: false, error: "Booking non trouvé" });
+    const parsedSeatsBooked = Number(seatsBooked) || 1;
+
+    if (parsedSeatsBooked <= 0) {
+      return res.json({ result: false, error: "Nombre de places invalide" });
     }
-  });
+
+    if (ride.placesLeft < parsedSeatsBooked) {
+      return res.json({
+        result: false,
+        error: "Pas assez de places disponibles",
+      });
+    }
+
+    const existingBooking = await Booking.findOne({
+      ride: ride._id,
+      passenger: user._id,
+    });
+
+    if (existingBooking) {
+      return res.json({
+        result: false,
+        error: "Vous avez déjà réservé ce trajet",
+      });
+    }
+
+    const newBooking = new Booking({
+      message: message || "",
+      bookingStatus: "pending",
+      paymentStatus: "authorized",
+      ride: ride._id,
+      passenger: user._id,
+      seatsBooked: parsedSeatsBooked,
+      maxAmount: Number(maxAmount),
+      finalAmount: null,
+      paymentIntentId: paymentIntentId,
+    });
+
+    const savedBooking = await newBooking.save();
+
+    ride.placesLeft = ride.placesLeft - parsedSeatsBooked;
+    await ride.save();
+
+    res.json({
+      result: true,
+      booking: savedBooking,
+      message: "Réservation créée avec succès",
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.json({
+        result: false,
+        error: "Vous avez déjà réservé ce trajet",
+      });
+    }
+
+    res.json({
+      result: false,
+      error: err.message || "Erreur lors de la réservation",
+    });
+  }
+});
+
+//
+// DELETE supprimer une réservation
+//
+router.delete("/delete/:bookingId", async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.bookingId);
+
+    if (!booking) {
+      return res.json({ result: false, error: "Réservation non trouvée" });
+    }
+
+    // Si paiement encore seulement autorisé, on annule la préautorisation
+    if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
+      try {
+        await stripe.paymentIntents.cancel(booking.paymentIntentId);
+      } catch (err) {
+        // on évite de tout casser si Stripe renvoie une erreur ici
+      }
+    }
+
+    const ride = await Ride.findById(booking.ride);
+    if (ride) {
+      ride.placesLeft = ride.placesLeft + booking.seatsBooked;
+      await ride.save();
+    }
+
+    await Booking.deleteOne({ _id: req.params.bookingId });
+
+    res.json({
+      result: true,
+      message: "Réservation supprimée avec succès",
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
 });
 
 module.exports = router;

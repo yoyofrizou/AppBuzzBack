@@ -6,6 +6,9 @@ router.get("/", function (req, res, next) {
   res.send("respond with a resource");
 });
 
+const Stripe = require("stripe");
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
 const User = require("../models/users");
 const { checkBody } = require("../modules/checkBody");
 const uid2 = require("uid2");
@@ -41,6 +44,7 @@ router.post("/signup", (req, res) => {
         email: req.body.email,
         password: hash,
         token: uid2(32),
+        stripeCustomerId: customer.id,  // paiement
         car: req.body.licencePlate
           ? {
               brand: req.body.brand,
@@ -153,11 +157,22 @@ router.post("/upload", (req, res) => {
   console.log("token reçu :", req.body.token); // 👈
   console.log("fichier reçu :", req.files?.photoFromFront); // 👈
 
+  if (!req.files || !req.files.photoFromFront) {
+    res.json({ result: false, error: "No file uploaded" });
+    return;
+  }
+
   req.files.photoFromFront.mv(photoPath).then(() => {
     cloudinary.uploader.upload(photoPath).then((resultCloudinary) => {
       fs.unlinkSync(photoPath); // On cherche l'utilisateur grâce à son token
+      
       User.findOne({ token: req.body.token }).then((user) => {
-        console.log("user trouvé :", user); // 👈
+        console.log("user trouvé :", user); 
+        
+         if (!user) {
+          res.json({ result: false, error: "User not found" });
+          return;
+        }
         // On ajoute la nouvelle URL à la fin du tableau photos existant
         user.photos = [...user.photos, resultCloudinary.secure_url];
         // On sauvegarde l'utilisateur avec la nouvelle photo
@@ -169,16 +184,25 @@ router.post("/upload", (req, res) => {
   });
 });
 
-router.delete("/deletePicture/:token", (req, res) => {
-  // On utilise le token passé dans l'URL (params) pour savoir qui supprimer
-  User.findOne({ photo: req.params.photo }).then((data) => {
-    
-    // deletedCount vaut 1 si quelqu'un a été supprimé, 0 sinon
-    if (data.deletedCount > 0) {
-      res.json({ result: true, message: "Photo supprimé avec succès" });
-    } else {
-      res.json({ result: false, error: "Photo non trouvé" });
+router.post("/deletePicture", (req, res) => {
+  if (!checkBody(req.body, ["token", "photoUrl"])) {
+    res.json({ result: false, error: "Missing fields" });
+    return;
+  }
+
+  User.findOne({ token: req.body.token }).then((user) => {
+    if (!user) {
+      res.json({ result: false, error: "User not found" });
+      return;
     }
+
+    user.photos = user.photos.filter(
+      (photo) => photo !== req.body.photoUrl
+    );
+
+    user.save().then(() => {
+      res.json({ result: true, message: "Photo supprimée avec succès" });
+    });
   });
 });
 

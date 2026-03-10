@@ -1,174 +1,415 @@
-const express = require("express"); //librairie qui permet de creer des routes (API backend)
-const router = express.Router(); //va contenir toutes les routes liées aux rides et sera branche dans app.js
-const Ride = require("../models/rides"); // import du modele Ride pour pouvoir creer un trajet, lire un trajet ou supprimer un trajet
-const User = require("../models/users"); //pour retrouver un utilisateur avec son token
+const express = require("express");
+const router = express.Router();
+
+const Ride = require("../models/rides");
+const User = require("../models/users");
 const Booking = require("../models/bookings");
+const Review = require("../models/reviews");
 
-router.post("/add", async (req, res) => {
-  if (
-    !req.body.departure ||
-    !req.body.arrival ||
-    !req.body.date ||
-    !req.body.price ||
-    !req.body.placesTotal ||
-    !req.body.user
-  ) {
-    //verifie que tous les champs sont présents, si le champ est vide, undefined ou null alors ca bloque
-    return res.json({
-      result: false,
-      error: "Remplir tous les champs.",
-    });
-  }
-
-  // ajout margo : vérifier totalCost (centimes)
-  const price = Number(req.body.price);
-  const placesTotal = Number(req.body.placesTotal);
-
-  if (!price || price <= 0) {
-    return res.json({ result: false, error: "Prix invalide" });
-  }
-
-  if (!placesTotal || placesTotal <= 0) {
-    //verifie que placesTotal est un nombre valide et positif
-    //placesTotal <= 0 verifie si 0 ou negatif
-    return res.json({ result: false, error: "placesTotal invalide" });
-  }
-  const user = await User.findOne({ token: req.body.user });
-
-  if (!user) {
-    return res.json({ result: false, error: "Utilisateur non trouvé" });
-  }
-
-  // calcul automatique du coût total (conducteur + 1 passager au pire cas)
-  const totalCost = price * 2;
-
-  const newRide = new Ride({
-    departure: req.body.departure,
-    arrival: req.body.arrival,
-    date: req.body.date,
-
-    price: price,
-
-    // ajouts margaux nécessaires au paiement simulé
-    placesTotal: placesTotal,
-    placesLeft: placesTotal,
-
-    totalCost: totalCost,
-
-    status: "open",
-
-    user: user._id,
-    car: user.car,
-  });
-
-  const ride = await newRide.save(); //enregistre le ride en base
-  res.json({ result: true, ride: ride }); //renvoie le ride créé au frontend
+const Stripe = require("stripe");
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
+//
+// 1. Publier un trajet
+//
+router.post("/create", async (req, res) => {
+  try {
+    const {
+      token,
+      departure,
+      arrival,
+      date,
+      price,
+      placesTotal,
+      totalCost,
+    } = req.body;
+
+    if (
+      !token ||
+      !departure ||
+      !arrival ||
+      !date ||
+      !price ||
+      !placesTotal ||
+      !totalCost
+    ) {
+      return res.json({
+        result: false,
+        error: "Remplir tous les champs",
+      });
+    }
+
+    const driver = await User.findOne({ token });
+    if (!driver) {
+      return res.json({ result: false, error: "Conducteur non trouvé" });
+    }
+
+    const parsedPrice = Number(price);
+    const parsedPlacesTotal = Number(placesTotal);
+    const parsedTotalCost = Number(totalCost);
+
+    if (parsedPrice <= 0 || parsedPlacesTotal <= 0 || parsedTotalCost <= 0) {
+      return res.json({
+        result: false,
+        error: "Valeurs invalides",
+      });
+    }
+
+    const newRide = new Ride({
+      departure,
+      arrival,
+      date: new Date(date),
+      price: parsedPrice,
+      placesTotal: parsedPlacesTotal,
+      placesLeft: parsedPlacesTotal,
+      totalCost: parsedTotalCost,
+      status: "open",
+      driver: driver._id,
+    });
+
+    const savedRide = await newRide.save();
+
+    res.json({
+      result: true,
+      ride: savedRide,
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
+});
+
+//
+// 2. Rechercher les trajets côté passager
+//
 router.get("/search", async (req, res) => {
-  const departure = req.query.departure; // req.query car le frontend fera une requête comme : GET /rides/search?departure=Paris&arrival=Lyon
-  const arrival = req.query.arrival;
-  const date = req.query.date;
+  try {
+    const { departure, arrival, date } = req.query;
 
-  const query = {
-    status: "open",
-    placesLeft: { $gt: 0 },
-  };
+    const query = {
+      status: "open",
+      placesLeft: { $gt: 0 },
+    };
 
-  if (departure) {
-    query.departure = new RegExp(departure, "i");
-  }
+    if (departure) {
+      query.departure = new RegExp(departure, "i");
+    }
 
-  if (arrival) {
-    query.arrival = new RegExp(arrival, "i");
-  }
+    if (arrival) {
+      query.arrival = new RegExp(arrival, "i");
+    }
 
-  if (date) {
-    query.date = new Date(date);
-  }
+    if (date) {
+      query.date = new Date(date);
+    }
 
-  const rides = await Ride.find(query).sort({ date: 1 });
+    const rides = await Ride.find(query)
+      .populate("driver", "firstname lastname username car")
+      .sort({ date: 1 });
 
-  res.json({
-    result: true,
-    rides: rides,
-  });
-});
-
-router.get("/:token", async (req, res) => {
-  const user = await User.findOne({ token: req.params.token });
-  if (!user) {
-    return res.json({ result: false, error: "Utilisateur non trouvé" });
-  }
-  const ride = await Ride.find({ user: user._id }); //récupère tous les rides créés par cet utilisateur
-  res.json({ result: true, rides: ride });
-});
-
-router.get("/", async (req, res) => {
-  const rides = await Ride.find().populate("user", "firstname lastname car");
-  res.json({ result: true, rides });
-});
-
-router.delete("/delete/:rideId", async (req, res) => {
-  const ride = await Ride.deleteOne({ _id: req.params.rideId });
-  if (ride.deletedCount > 0) {
-    res.json({ result: true, message: "Trajet supprimé" });
-  } else {
-    res.json({ result: false, error: "Trajet non trouvé" });
-  }
-});
-
-router.post("/:id/start", async (req, res) => {
-  const ride = await Ride.findById(req.params.id);
-
-  if (!ride) {
-    return res.json({ result: false, error: "Ride introuvable" });
-  }
-
-  if (ride.status !== "open") {
-    return res.json({ result: false, error: "Ride non démarrable" });
-  }
-
-  const bookings = await Booking.find({
-    ride: ride._id,
-    status: "authorized",
-  });
-
-  if (bookings.length === 0) {
-    return res.json({ result: false, error: "Aucun passager" });
-  }
-
-  // calcul du nombre total de passagers
-  let n = 0;
-  for (let b of bookings) {
-    n += b.seatsBooked;
-  }
-
-  const finalPricePerSeat = Math.floor(ride.totalCost / (n + 1));
-
-  if (n <= 0) {
-    return res.json({
-      result: false,
-      error: "Nombre de places réservées invalide",
+    res.json({
+      result: true,
+      rides,
     });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
   }
+});
 
-  // chaque booking paie seatsBooked * finalPricePerSeat
-  for (let b of bookings) {
-    b.status = "captured";
-    b.finalAmount = finalPricePerSeat * b.seatsBooked;
-    await b.save();
+//
+// 3. Récupérer les trajets du conducteur
+//
+router.get("/driver/:token", async (req, res) => {
+  try {
+    const driver = await User.findOne({ token: req.params.token });
+
+    if (!driver) {
+      return res.json({ result: false, error: "Conducteur non trouvé" });
+    }
+
+    const proposedRides = await Ride.find({
+      driver: driver._id,
+      status: { $in: ["open", "started"] },
+    }).sort({ date: 1 });
+
+    const pastRides = await Ride.find({
+      driver: driver._id,
+      status: { $in: ["completed", "cancelled"] },
+    }).sort({ date: -1 });
+
+    res.json({
+      result: true,
+      proposedRides,
+      pastRides,
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
   }
+});
 
-  ride.status = "started";
-  await ride.save();
+//
+// 4. Récupérer les détails d’un trajet + ses réservations
+//
+router.get("/:rideId/bookings", async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.rideId).populate(
+      "driver",
+      "firstname lastname username car"
+    );
 
-  res.json({
-    result: true,
-    passengers: n,
-    pricePerSeat: finalPricePerSeat,
-    message: "Prix final calculé",
-  });
+    if (!ride) {
+      return res.json({ result: false, error: "Trajet introuvable" });
+    }
+
+    const bookings = await Booking.find({ ride: ride._id })
+      .populate("passenger", "firstname lastname username email photos")
+      .sort({ createdAt: 1 });
+
+    res.json({
+      result: true,
+      ride,
+      bookings,
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
+});
+
+//
+// 5. Marquer un passager comme validé
+//
+router.post("/bookings/validate", async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+
+    if (!bookingId) {
+      return res.json({ result: false, error: "bookingId manquant" });
+    }
+
+    const booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      return res.json({ result: false, error: "Booking introuvable" });
+    }
+
+    booking.bookingStatus = "validated";
+    await booking.save();
+
+    res.json({
+      result: true,
+      booking,
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
+});
+
+//
+// 6. Marquer un passager absent
+//
+router.post("/bookings/absent", async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+
+    if (!bookingId) {
+      return res.json({ result: false, error: "bookingId manquant" });
+    }
+
+    const booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      return res.json({ result: false, error: "Booking introuvable" });
+    }
+
+    booking.bookingStatus = "absent";
+    await booking.save();
+
+    res.json({
+      result: true,
+      booking,
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
+});
+
+//
+// 7. Démarrer le trajet
+// -> capture les validés
+// -> annule les absents
+//
+router.post("/start", async (req, res) => {
+  try {
+    const { rideId } = req.body;
+
+    if (!rideId) {
+      return res.json({ result: false, error: "rideId manquant" });
+    }
+
+    const ride = await Ride.findById(rideId);
+
+    if (!ride) {
+      return res.json({ result: false, error: "Trajet introuvable" });
+    }
+
+    if (ride.status !== "open") {
+      return res.json({ result: false, error: "Trajet non démarrable" });
+    }
+
+    const bookings = await Booking.find({ ride: ride._id });
+
+    if (bookings.length === 0) {
+      return res.json({ result: false, error: "Aucun passager" });
+    }
+
+    const allProcessed = bookings.every(
+      (booking) =>
+        booking.bookingStatus === "validated" ||
+        booking.bookingStatus === "absent"
+    );
+
+    if (!allProcessed) {
+      return res.json({
+        result: false,
+        error: "Tous les passagers ne sont pas encore traités",
+      });
+    }
+
+    for (const booking of bookings) {
+      if (
+        booking.bookingStatus === "validated" &&
+        booking.paymentIntentId &&
+        booking.paymentStatus === "authorized"
+      ) {
+        await stripe.paymentIntents.capture(booking.paymentIntentId);
+
+        booking.paymentStatus = "captured";
+        booking.finalAmount = booking.maxAmount;
+        await booking.save();
+      }
+
+      if (
+        booking.bookingStatus === "absent" &&
+        booking.paymentIntentId &&
+        booking.paymentStatus === "authorized"
+      ) {
+        await stripe.paymentIntents.cancel(booking.paymentIntentId);
+
+        booking.paymentStatus = "cancelled";
+        await booking.save();
+      }
+    }
+
+    ride.status = "started";
+    await ride.save();
+
+    res.json({
+      result: true,
+      message: "Trajet démarré",
+      ride,
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
+});
+
+//
+// 8. Terminer le trajet
+//
+router.post("/complete", async (req, res) => {
+  try {
+    const { rideId } = req.body;
+
+    if (!rideId) {
+      return res.json({ result: false, error: "rideId manquant" });
+    }
+
+    const ride = await Ride.findById(rideId);
+
+    if (!ride) {
+      return res.json({ result: false, error: "Trajet introuvable" });
+    }
+
+    ride.status = "completed";
+    await ride.save();
+
+    res.json({
+      result: true,
+      message: "Trajet terminé",
+      ride,
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
+});
+
+//
+// 9. Envoyer les évaluations
+//
+router.post("/reviews/create", async (req, res) => {
+  try {
+    const { token, rideId, reviews } = req.body;
+
+    if (!token || !rideId || !reviews || !Array.isArray(reviews)) {
+      return res.json({ result: false, error: "Champs manquants" });
+    }
+
+    const reviewer = await User.findOne({ token });
+    if (!reviewer) {
+      return res.json({ result: false, error: "Utilisateur introuvable" });
+    }
+
+    // 🔴 Vérifier que le trajet existe
+    const ride = await Ride.findById(rideId);
+    if (!ride) {
+      return res.json({ result: false, error: "Trajet introuvable" });
+    }
+
+    // 🔴 Vérifier que le trajet est terminé
+    if (ride.status !== "completed") {
+      return res.json({
+        result: false,
+        error: "Le trajet doit être terminé avant évaluation",
+      });
+    }
+
+    // Création des reviews
+    for (const item of reviews) {
+      const review = new Review({
+        ride: rideId,
+        reviewer: reviewer._id,
+        reviewedUser: item.reviewedUserId,
+        rating: item.rating,
+        comment: item.comment || "",
+      });
+
+      await review.save();
+    }
+
+    res.json({
+      result: true,
+      message: "Évaluations enregistrées",
+    });
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
+});
+//
+// 10. Supprimer un trajet
+//
+router.delete("/delete/:rideId", async (req, res) => {
+  try {
+    const result = await Ride.deleteOne({ _id: req.params.rideId });
+
+    if (result.deletedCount > 0) {
+      res.json({ result: true, message: "Trajet supprimé" });
+    } else {
+      res.json({ result: false, error: "Trajet non trouvé" });
+    }
+  } catch (error) {
+    res.json({ result: false, error: error.message });
+  }
 });
 
 module.exports = router;

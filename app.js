@@ -7,13 +7,13 @@ var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 
 var indexRouter = require('./routes/index');
-var usersRouter = require('./routes/users');
-var bookingRouter = require('./routes/bookings');
-var reviewRouter = require('./routes/reviews');
-var rideRouter = require('./routes/rides');
-var conversationsRouter = require('./routes/conversations');
+const reviewRouter = require('./routes/reviews');
+const conversationsRouter = require('./routes/conversations');
 
-var paymentsRouter = require("./routes/payments");
+const usersRouter = require("./routes/users");
+const ridesRouter = require("./routes/rides");
+const paymentsRouter = require("./routes/payments");
+const bookingsRouter = require('./routes/bookings');
 
 var app = express();
 
@@ -31,12 +31,12 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/', indexRouter);
-app.use('/users', usersRouter);
-app.use('/bookings', bookingRouter);
-app.use('/rides', rideRouter);
 app.use('/reviews', reviewRouter);
 app.use('/conversations', conversationsRouter);
 
+app.use("/users", usersRouter);
+app.use("/rides", ridesRouter);
 app.use("/payments", paymentsRouter);
+app.use('/bookings', bookingsRouter);
 
 module.exports = app;

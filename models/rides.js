@@ -1,19 +1,47 @@
 const mongoose = require("mongoose");
 
-
-
 const rideSchema = mongoose.Schema(
   {
-    departure: String,
-    arrival: String,
-    date: Date,
-    price: { type: Number, required: true }, //price en String c'est pas pratique pour calculer, prix par passager fixé par le conducteur
+    departure: {
+      type: String,
+      required: true,
+    },
 
-    placesTotal: { type: Number, required: true, min: 1 },
-    placesLeft: { type: Number, required: true, min: 0 }, //places en Number (au lieu de String)
+    arrival: {
+      type: String,
+      required: true,
+    },
 
-    // fixé quand le conducteur crée le ride (c’est le coût total estimé du trajet)
-    totalCost: { type: Number, required: true, min: 1 },
+    date: {
+      type: Date,
+      required: true,
+    },
+
+    // prix par passager
+    price: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    placesTotal: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    placesLeft: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    // coût total estimé du trajet
+    totalCost: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
 
     status: {
       type: String,
@@ -22,13 +50,18 @@ const rideSchema = mongoose.Schema(
       index: true,
     },
 
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
-    
+    // conducteur du trajet
+    driver: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      required: true,
+      index: true,
+    },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
-rideSchema.index({ status: 1, date: 1 }); //permet à Mongo de trouver rapidement les rides ouverts et les trier par date
+rideSchema.index({ status: 1, date: 1 });
 
 const Ride = mongoose.model("rides", rideSchema);
 
