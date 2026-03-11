@@ -12,38 +12,23 @@ const carSchema = mongoose.Schema({
   },
 });
 
-const userSchema = mongoose.Schema({
-  firstname: String,
-  lastname: String,
-  username: {
-    type: String,
-    unique: true, // empêche deux comptes avec le même username
-  },
-  password: String,
-  email: String,
-  token: String,
+const userSchema = new mongoose.Schema({
+  prenom: { type: String, required: true },
+  nom: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  telephone: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
 
-  // Stripe
-  stripeCustomerId: {
-    type: String,
-    default: null,
-  },
-  defaultPaymentMethodId: {
-    type: String,
-    default: null,
-  },
+  token: { type: String, default: null },
 
-  car: {
-    type: carSchema,
-    default: null,
-  },
+  profilePhoto: { type: String, default: null },
+  photos: { type: [String], default: [] },
+  car: { type: Object, default: null },
 
-  photos: {
-    type: [String],
-    default: [], // évite les bugs quand tu fais push sur photos
-  },
+  stripeCustomerId: { type: String, default: null },
+  defaultPaymentMethodId: { type: String, default: null },
 });
 
-const User = mongoose.model("users", userSchema);
+module.exports = mongoose.model("User", userSchema);
 
-module.exports = User;
+ 
