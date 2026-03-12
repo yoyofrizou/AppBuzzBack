@@ -20,9 +20,12 @@ cloudinary.config({
 });
 
 router.post("/register", async (req, res) => {
-  const photoPath = `./tmp/${uniqid()}.jpg`;
+  const photoPath = `/tmp/${uniqid()}.jpg`;
 
   try {
+    console.log("BODY REGISTER:", req.body);
+    console.log("FILES REGISTER:", req.files);
+
     if (
       !checkBody(req.body, [
         "prenom",
@@ -33,22 +36,18 @@ router.post("/register", async (req, res) => {
         "confirmPassword",
       ])
     ) {
-      res.json({ result: false, error: "Champs manquants." });
-      return;
+      return res.json({ result: false, error: "Champs manquants." });
     }
 
-
- if (req.body.password !== req.body.confirmPassword) {
-      res.json({
+    if (req.body.password !== req.body.confirmPassword) {
+      return res.json({
         result: false,
         error: "Les mots de passe ne correspondent pas.",
       });
-      return;
     }
 
     if (!req.files || !req.files.profilePhoto) {
-      res.json({ result: false, error: "Photo de profil obligatoire." });
-      return;
+      return res.json({ result: false, error: "Photo de profil obligatoire." });
     }
 
     const existingUser = await User.findOne({
@@ -59,15 +58,20 @@ router.post("/register", async (req, res) => {
     });
 
     if (existingUser) {
-      res.json({ result: false, error: "Utilisateur déjà existant." });
-      return;
+      return res.json({ result: false, error: "Utilisateur déjà existant." });
     }
 
     const hash = bcrypt.hashSync(req.body.password, 10);
+    console.log("Hash OK");
 
     await req.files.profilePhoto.mv(photoPath);
+    console.log("Photo déplacée :", photoPath);
+
     const resultCloudinary = await cloudinary.uploader.upload(photoPath);
+    console.log("Cloudinary OK :", resultCloudinary.secure_url);
+
     fs.unlinkSync(photoPath);
+    console.log("Tmp supprimé");
 
     const newUser = new User({
       prenom: req.body.prenom.trim(),
@@ -84,8 +88,9 @@ router.post("/register", async (req, res) => {
     });
 
     const savedUser = await newUser.save();
+    console.log("User saved :", savedUser._id);
 
-    res.json({
+    return res.json({
       result: true,
       token: savedUser.token,
       user: {
@@ -100,8 +105,11 @@ router.post("/register", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ result: false, error: "Erreur serveur." });
+    console.error("REGISTER ERROR:", error);
+    return res.status(500).json({
+      result: false,
+      error: error.message,
+    });
   }
 });
 
@@ -198,7 +206,7 @@ router.post("/addCar", async (req, res) => {
 });
 
 router.post("/upload", async (req, res) => {
-  const photoPath = `./tmp/${uniqid()}.jpg`;
+  const photoPath = `/tmp/${uniqid()}.jpg`;
 
   try {
     if (!req.body.token) {
@@ -233,7 +241,7 @@ router.post("/upload", async (req, res) => {
 });
 
 router.put("/updateProfilePhoto", async (req, res) => {
-  const photoPath = `./tmp/${uniqid()}.jpg`;
+  const photoPath = `/tmp/${uniqid()}.jpg`;
 
   try {
     if (!req.files || !req.files.profilePhoto) {
