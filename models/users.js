@@ -29,6 +29,6 @@ const userSchema = new mongoose.Schema({
   defaultPaymentMethodId: { type: String, default: null },
 });
 
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.model("users", userSchema);
 
  
