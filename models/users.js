@@ -27,6 +27,9 @@ const userSchema = new mongoose.Schema({
 
   stripeCustomerId: { type: String, default: null },
   defaultPaymentMethodId: { type: String, default: null },
+
+  resetPasswordToken: { type: String, default: null },
+  resetPasswordExpires: { type: Date, default: null },
 });
 
 module.exports = mongoose.model("users", userSchema);

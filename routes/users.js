@@ -13,6 +13,17 @@ const uniqid = require("uniqid");
 const cloudinary = require("cloudinary").v2;
 const fs = require("fs");
 
+const nodemailer = require("nodemailer");
+const crypto = require("crypto");
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS,
+  },
+});
+
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -301,6 +312,109 @@ router.post("/deletePicture", async (req, res) => {
     console.error(error);
     res.status(500).json({ result: false, error: "Erreur serveur." });
   }
+router.post("/forgot-password", async (req, res) => {
+  try {
+    if (!checkBody(req.body, ["email"])) {
+      return res.json({ result: false, error: "Email manquant." });
+    }
+
+    const email = req.body.email.trim().toLowerCase();
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.json({
+        result: true,
+        message:
+          "Si un compte existe avec cette adresse, un email de réinitialisation a été envoyé.",
+      });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetExpires = new Date(Date.now() + 1000 * 60 * 30);
+
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpires = resetExpires;
+    await user.save();
+
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+
+    await transporter.sendMail({
+      from: process.env.MAIL_USER,
+      to: user.email,
+      subject: "Réinitialisation de votre mot de passe BUZZ",
+      html: `
+        <p>Bonjour ${user.prenom},</p>
+        <p>Vous avez demandé la réinitialisation de votre mot de passe.</p>
+        <p>Cliquez sur le lien ci-dessous :</p>
+        <a href="${resetLink}">${resetLink}</a>
+        <p>Ce lien expire dans 30 minutes.</p>
+      `,
+    });
+
+    res.json({
+      result: true,
+      message:
+        "Si un compte existe avec cette adresse, un email de réinitialisation a été envoyé.",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ result: false, error: "Erreur serveur." });
+  }
+});
+router.post("/reset-password", async (req, res) => {
+  try {
+    if (!checkBody(req.body, ["token", "password", "confirmPassword"])) {
+      return res.json({ result: false, error: "Champs manquants." });
+    }
+
+    const { token, password, confirmPassword } = req.body;
+
+    if (password !== confirmPassword) {
+      return res.json({
+        result: false,
+        error: "Les mots de passe ne correspondent pas.",
+      });
+    }
+
+    const passwordRegex = /^(?=.*[^A-Za-z0-9])[A-Za-z0-9\S]{8,}$/;
+    if (!passwordRegex.test(password)) {
+      return res.json({
+        result: false,
+        error:
+          "Le mot de passe doit contenir au moins 8 caractères et au moins 1 caractère spécial.",
+      });
+    }
+
+    const user = await User.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.json({
+        result: false,
+        error: "Lien invalide ou expiré.",
+      });
+    }
+
+    const hash = bcrypt.hashSync(password, 10);
+
+    user.password = hash;
+    user.resetPasswordToken = null;
+    user.resetPasswordExpires = null;
+
+    await user.save();
+
+    res.json({
+      result: true,
+      message: "Mot de passe réinitialisé avec succès.",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ result: false, error: "Erreur serveur." });
+  }
+});
 });
 
 module.exports = router;
