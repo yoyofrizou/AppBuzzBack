@@ -34,8 +34,6 @@ router.post("/register", async (req, res) => {
   const photoPath = `/tmp/${uniqid()}.jpg`;
 
   try {
-    console.log("BODY REGISTER:", req.body);
-    console.log("FILES REGISTER:", req.files);
 
     if (
       !checkBody(req.body, [
@@ -134,6 +132,7 @@ router.post("/login", async (req, res) => {
     const data = await User.findOne({
       email: req.body.email.trim().toLowerCase(),
     });
+     console.log("USER FOUND LOGIN =", data);
 
     if (data && bcrypt.compareSync(req.body.password, data.password)) {
       res.json({
