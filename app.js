@@ -10,13 +10,19 @@ const fileUpload = require("express-fileupload");
 
 var indexRouter = require("./routes/index");
 var usersRouter = require("./routes/users");
-var ridesRouter = require("./routes/rides");
+const paymentsRouter = require("./routes/payments");
+const bookingsRouter = require("./routes/bookings");
+const ridesRouter = require("./routes/rides");
+
+const User = require("./models/users");
 
 var app = express();
 
 mongoose
   .connect(process.env.CONNECTION_STRING)
-  .then(() => console.log("Database connected"))
+  .then(() => { console.log("Database connected");
+ console.log("Mongo DB users:", mongoose.connection.users);
+  })
   .catch((error) => console.error("MongoDB connection error:", error));
 
 app.use(cors());
@@ -36,6 +42,9 @@ app.use(
 
 app.use("/", indexRouter);
 app.use("/users", usersRouter);
+
+app.use("/payments", paymentsRouter);
+app.use("/bookings", bookingsRouter);
 app.use("/rides", ridesRouter);
 
 app.use(function (req, res, next) {

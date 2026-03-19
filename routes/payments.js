@@ -7,16 +7,17 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
-// 1) SetupIntent + EphemeralKey pour enregistrer une carte dans le profil
+// 1) SetupIntent + EphemeralKey pour enregistrer une carte
 router.post("/setup-intent", async (req, res) => {
   try {
     const { token } = req.body;
 
     const user = await User.findOne({ token });
-    if (!user) return res.json({ result: false, error: "Utilisateur non trouvé" });
+    if (!user) {
+      return res.json({ result: false, error: "Utilisateur non trouvé" });
+    }
 
-    // customer stripe
-     if (!user.stripeCustomerId) {
+    if (!user.stripeCustomerId) {
       const customer = await stripe.customers.create({
         email: user.email || undefined,
         name:
@@ -30,17 +31,15 @@ router.post("/setup-intent", async (req, res) => {
       await user.save();
     }
 
-    // ephemeral key requis pour PaymentSheet
     const ephemeralKey = await stripe.ephemeralKeys.create(
       { customer: user.stripeCustomerId },
       { apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16" }
     );
 
-     // SetupIntent pour enregistrer la carte
     const setupIntent = await stripe.setupIntents.create({
       customer: user.stripeCustomerId,
       payment_method_types: ["card"],
-      usage: "off_session", // important: futur paiement sans ouvrir sheet
+      usage: "off_session",
     });
 
     res.json({
@@ -49,18 +48,20 @@ router.post("/setup-intent", async (req, res) => {
       ephemeralKeySecret: ephemeralKey.secret,
       setupIntentClientSecret: setupIntent.client_secret,
     });
-   } catch (err) {
+  } catch (err) {
     res.json({ result: false, error: err.message });
   }
 });
 
-// 2) Par defaut
+// 2) Définir la carte comme carte par défaut
 router.post("/attach-default-payment-method", async (req, res) => {
   try {
     const { token, setupIntentId } = req.body;
 
     const user = await User.findOne({ token });
-    if (!user) return res.json({ result: false, error: "Utilisateur non trouvé" });
+    if (!user) {
+      return res.json({ result: false, error: "Utilisateur non trouvé" });
+    }
 
     if (!user.stripeCustomerId) {
       return res.json({ result: false, error: "Customer Stripe manquant" });
@@ -78,22 +79,22 @@ router.post("/attach-default-payment-method", async (req, res) => {
     const paymentMethodId = setupIntent.payment_method;
 
     if (!paymentMethodId) {
-      return res.json({ result: false, error: "payment_method introuvable dans SetupIntent" });
+      return res.json({
+        result: false,
+        error: "payment_method introuvable dans SetupIntent",
+      });
     }
 
-    // Attacher au customer si besoin
     try {
       await stripe.paymentMethods.attach(paymentMethodId, {
         customer: user.stripeCustomerId,
       });
     } catch (err) {
-      // Si déjà attaché, on laisse passer
       if (!err.message.toLowerCase().includes("already")) {
         throw err;
       }
     }
 
-    // mettre par défaut
     await stripe.customers.update(user.stripeCustomerId, {
       invoice_settings: { default_payment_method: paymentMethodId },
     });
@@ -101,7 +102,7 @@ router.post("/attach-default-payment-method", async (req, res) => {
     user.defaultPaymentMethodId = paymentMethodId;
     await user.save();
 
-  res.json({
+    res.json({
       result: true,
       message: "Carte enregistrée et définie par défaut",
       defaultPaymentMethodId: paymentMethodId,
@@ -111,7 +112,7 @@ router.post("/attach-default-payment-method", async (req, res) => {
   }
 });
 
-// 3) Récupérer la carte par défaut / les infos utiles
+// 3) Récupérer les cartes du user
 router.get("/payment-methods/:token", async (req, res) => {
   try {
     const user = await User.findOne({ token: req.params.token });
@@ -146,7 +147,7 @@ router.get("/payment-methods/:token", async (req, res) => {
   }
 });
 
-// 4) Préautorisation / hold
+// 4) Préautorisation avec carte par défaut
 router.post("/authorize-payment", async (req, res) => {
   try {
     const { token, maxAmount, metadata } = req.body;
@@ -160,12 +161,12 @@ router.post("/authorize-payment", async (req, res) => {
       return res.json({ result: false, error: "Aucune carte enregistrée" });
     }
 
-    if (!maxAmount || maxAmount <= 0) {
+    if (!maxAmount || Number(maxAmount) <= 0) {
       return res.json({ result: false, error: "Montant invalide" });
     }
 
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: maxAmount,
+      amount: Number(maxAmount),
       currency: "eur",
       customer: user.stripeCustomerId,
       payment_method: user.defaultPaymentMethodId,
@@ -185,7 +186,7 @@ router.post("/authorize-payment", async (req, res) => {
   }
 });
 
-// 5) Préautorisation one-shot sans enregistrer la carte
+// 5) Préautorisation one-shot
 router.post("/authorize-payment-onetime", async (req, res) => {
   try {
     const { token, maxAmount, currency, metadata } = req.body;
@@ -223,7 +224,7 @@ router.post("/authorize-payment-onetime", async (req, res) => {
   }
 });
 
-// 6) Capture
+// 6) Capture finale
 router.post("/capture-payment", async (req, res) => {
   try {
     const { paymentIntentId, amountToCapture } = req.body;
@@ -237,10 +238,7 @@ router.post("/capture-payment", async (req, res) => {
       options.amount_to_capture = Number(amountToCapture);
     }
 
-    const captured = await stripe.paymentIntents.capture(
-      paymentIntentId,
-      options
-    );
+    const captured = await stripe.paymentIntents.capture(paymentIntentId, options);
 
     res.json({
       result: true,
@@ -251,15 +249,15 @@ router.post("/capture-payment", async (req, res) => {
   }
 });
 
-// 6) Annuler une préautorisation
+// 7) Annuler la préautorisation
 router.post("/cancel-payment", async (req, res) => {
   try {
     const { paymentIntentId } = req.body;
 
-     if (!paymentIntentId) {
+    if (!paymentIntentId) {
       return res.json({ result: false, error: "paymentIntentId manquant" });
     }
-    
+
     const cancelled = await stripe.paymentIntents.cancel(paymentIntentId);
 
     res.json({
@@ -271,7 +269,7 @@ router.post("/cancel-payment", async (req, res) => {
   }
 });
 
-// 7) historique versements
+// 8) Historique paiements du passager
 router.get("/history/:token", async (req, res) => {
   try {
     const user = await User.findOne({ token: req.params.token });
@@ -280,13 +278,11 @@ router.get("/history/:token", async (req, res) => {
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
-    // Pour l'instant on prend les bookings capturés du passager
-    // Tu pourras plus tard distinguer "versements reçus" conducteur / "paiements effectués" passager
     const Booking = require("../models/bookings");
 
     const bookings = await Booking.find({
-      passenger: user._id,
-      paymentStatus: "captured",
+      user: user._id,
+      status: "captured",
     })
       .populate("ride")
       .sort({ updatedAt: -1 });

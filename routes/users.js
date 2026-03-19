@@ -94,7 +94,14 @@ router.post("/register", async (req, res) => {
       defaultPaymentMethodId: null,
       car: null,
       photos: [],
-    });
+      driverProfile: {
+      driverLicenseUrl: null,
+      identityDocumentUrl: null,
+      insuranceDocumentUrl: null,
+      isProfileComplete: false,
+      isVerified: false,
+     },
+       });
 
     const savedUser = await newUser.save();
     console.log("User saved :", savedUser._id);
@@ -132,7 +139,6 @@ router.post("/login", async (req, res) => {
     const data = await User.findOne({
       email: req.body.email.trim().toLowerCase(),
     });
-     console.log("USER FOUND LOGIN =", data);
 
     if (data && bcrypt.compareSync(req.body.password, data.password)) {
       res.json({
@@ -146,6 +152,7 @@ router.post("/login", async (req, res) => {
           telephone: data.telephone,
           profilePhoto: data.profilePhoto,
           car: data.car,
+          driverProfile: data.driverProfile,
           photos: data.photos,
           stripeCustomerId: data.stripeCustomerId,
           defaultPaymentMethodId: data.defaultPaymentMethodId,
@@ -289,6 +296,160 @@ router.put("/updateProfilePhoto", async (req, res) => {
   }
 });
 
+router.post("/uploadDriverDocument", async (req, res) => {
+  const photoPath = `/tmp/${uniqid()}.jpg`;
+
+  try {
+    if (!req.body.token) {
+      return res.json({ result: false, error: "Token manquant." });
+    }
+
+    if (!req.body.documentType) {
+      return res.json({ result: false, error: "Type de document manquant." });
+    }
+
+    if (!req.files || !req.files.document) {
+      return res.json({ result: false, error: "Document manquant." });
+    }
+
+    const { documentType } = req.body;
+
+    const allowedTypes = [
+      "driverLicense",
+      "identityDocument",
+      "insuranceDocument",
+    ];
+
+    if (!allowedTypes.includes(documentType)) {
+      return res.json({ result: false, error: "Type de document invalide." });
+    }
+
+    await req.files.document.mv(photoPath);
+    const resultCloudinary = await cloudinary.uploader.upload(photoPath);
+    fs.unlinkSync(photoPath);
+
+    const user = await User.findOne({ token: req.body.token });
+
+    if (!user) {
+      return res.json({ result: false, error: "Utilisateur introuvable." });
+    }
+
+    if (!user.driverProfile) {
+      user.driverProfile = {};
+    }
+
+    if (documentType === "driverLicense") {
+      user.driverProfile.driverLicenseUrl = resultCloudinary.secure_url;
+    }
+
+    if (documentType === "identityDocument") {
+      user.driverProfile.identityDocumentUrl = resultCloudinary.secure_url;
+    }
+
+    if (documentType === "insuranceDocument") {
+      user.driverProfile.insuranceDocumentUrl = resultCloudinary.secure_url;
+    }
+
+    const isProfileComplete =
+      user.car &&
+      user.car.brand &&
+      user.car.color &&
+      user.car.model &&
+      user.car.nbSeats > 0 &&
+      user.car.licencePlate &&
+      user.driverProfile.driverLicenseUrl &&
+      user.driverProfile.identityDocumentUrl &&
+      user.driverProfile.insuranceDocumentUrl;
+
+    user.driverProfile.isProfileComplete = Boolean(isProfileComplete);
+
+    await user.save();
+
+    return res.json({
+      result: true,
+      message: "Document envoyé avec succès.",
+      url: resultCloudinary.secure_url,
+      driverProfile: user.driverProfile,
+    });
+  } catch (error) {
+    console.error("POST /users/uploadDriverDocument error:", error);
+    return res.status(500).json({
+      result: false,
+      error: "Erreur serveur.",
+    });
+  }
+});
+
+router.put("/updateDriverProfile", async (req, res) => {
+  try {
+    const {
+      token,
+      brand,
+      color,
+      model,
+      nbSeats,
+      licencePlate,
+      driverLicenseUrl,
+      identityDocumentUrl,
+      insuranceDocumentUrl,
+    } = req.body;
+
+    if (!token) {
+      return res.json({ result: false, error: "Token manquant." });
+    }
+
+    const user = await User.findOne({ token });
+
+    if (!user) {
+      return res.json({ result: false, error: "Utilisateur introuvable." });
+    }
+
+    user.car = {
+      brand: brand?.trim() || "",
+      color: color?.trim() || "",
+      model: model?.trim() || "",
+      nbSeats: Number(nbSeats) || 0,
+      licencePlate: licencePlate?.trim() || "",
+    };
+
+    user.driverProfile.driverLicenseUrl = driverLicenseUrl?.trim() || null;
+    user.driverProfile.identityDocumentUrl = identityDocumentUrl?.trim() || null;
+    user.driverProfile.insuranceDocumentUrl = insuranceDocumentUrl?.trim() || null;
+
+    const isProfileComplete =
+      user.car &&
+      user.car.brand &&
+      user.car.color &&
+      user.car.model &&
+      user.car.nbSeats > 0 &&
+      user.car.licencePlate &&
+      user.driverProfile.driverLicenseUrl &&
+      user.driverProfile.identityDocumentUrl &&
+      user.driverProfile.insuranceDocumentUrl;
+
+    user.driverProfile.isProfileComplete = Boolean(isProfileComplete);
+
+    await user.save();
+
+    res.json({
+      result: true,
+      message: "Profil conducteur mis à jour.",
+      car: user.car,
+      driverProfile: user.driverProfile,
+      user: {
+        prenom: user.prenom,
+        nom: user.nom,
+        email: user.email,
+        telephone: user.telephone,
+        profilePhoto: user.profilePhoto,
+      },
+    });
+  } catch (error) {
+    console.error("PUT /users/updateDriverProfile error:", error);
+    res.status(500).json({ result: false, error: "Erreur serveur." });
+  }
+});
+
 router.post("/deletePicture", async (req, res) => {
   try {
     if (!checkBody(req.body, ["token", "photoUrl"])) {
@@ -311,6 +472,9 @@ router.post("/deletePicture", async (req, res) => {
     console.error(error);
     res.status(500).json({ result: false, error: "Erreur serveur." });
   }
+});
+
+  
 router.post("/forgot-password", async (req, res) => {
   try {
     if (!checkBody(req.body, ["email"])) {
@@ -356,11 +520,13 @@ router.post("/forgot-password", async (req, res) => {
       message:
         "Si un compte existe avec cette adresse, un email de réinitialisation a été envoyé.",
     });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ result: false, error: "Erreur serveur." });
   }
 });
+
 router.post("/reset-password", async (req, res) => {
   try {
     if (!checkBody(req.body, ["token", "password", "confirmPassword"])) {
@@ -413,7 +579,53 @@ router.post("/reset-password", async (req, res) => {
     console.error(error);
     res.status(500).json({ result: false, error: "Erreur serveur." });
   }
-});
+  });
+
+  router.put("/updatePassengerInfos", async (req, res) => {
+
+  try {
+    const { token, firstName, lastName, phone, email } = req.body;
+
+    if (!token) {
+      return res.json({ result: false, error: "Token manquant." });
+    }
+
+    const user = await User.findOne({ token });
+
+    if (!user) {
+      return res.json({ result: false, error: "Utilisateur introuvable." });
+    }
+
+    user.prenom = firstName?.trim() || "";
+    user.nom = lastName?.trim() || "";
+    user.telephone = phone?.trim() || "";
+    user.email = email?.trim().toLowerCase() || "";
+
+    await user.save();
+
+    return res.json({
+      result: true,
+      message: "Informations passager mises à jour.",
+      user: {
+        prenom: user.prenom,
+        nom: user.nom,
+        email: user.email,
+        telephone: user.telephone,
+        profilePhoto: user.profilePhoto,
+        token: user.token,
+        car: user.car,
+        driverProfile: user.driverProfile,
+        stripeCustomerId: user.stripeCustomerId,
+        defaultPaymentMethodId: user.defaultPaymentMethodId,
+      },
+    });
+  } catch (error) {
+    console.error("PUT /users/updatePassengerInfos error:", error);
+    return res.status(500).json({
+      result: false,
+      error: "Erreur serveur.",
+    });
+  }
 });
 
 module.exports = router;
