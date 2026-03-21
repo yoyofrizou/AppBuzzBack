@@ -52,10 +52,15 @@ const bookingSchema = mongoose.Schema(
     },
   passengerPresenceStatus: {
       type: String,
-      enum: ["pending", "scanned", "absent"],
+      enum: ["pending", "scanned", "manual", "absent"],
       default: "pending",
       index: true,
     },
+
+  manualValidatedAt: {
+  type: Date,
+  default: null,
+},
 
     scannedAt: {
       type: Date,

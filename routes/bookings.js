@@ -5,6 +5,8 @@ const Stripe = require("stripe");
 const Booking = require("../models/bookings");
 const User = require("../models/users");
 const Ride = require("../models/rides");
+const Conversation = require("../models/conversations");
+const Message = require("../models/messages");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
@@ -75,7 +77,11 @@ router.post("/add", async (req, res) => {
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
-    const ride = await Ride.findById(rideId);
+    const ride = await Ride.findById(rideId).populate(
+      "user",
+      "firstname lastname averageRating"
+    );
+
     if (!ride) {
       return res.json({ result: false, error: "Trajet non trouvé" });
     }
@@ -131,9 +137,83 @@ router.post("/add", async (req, res) => {
     ride.placesLeft = ride.placesLeft - parsedSeatsBooked;
     await ride.save();
 
+    const driver = ride.user;
+
+    if (!driver) {
+      return res.json({
+        result: false,
+        error: "Conducteur du trajet introuvable",
+      });
+    }
+
+    const passengerFullName = `${user.firstname || ""} ${user.lastname || ""}`.trim();
+    const driverFullName = `${driver.firstname || ""} ${driver.lastname || ""}`.trim();
+
+    let conversation = await Conversation.findOne({
+      ride: ride._id,
+      driver: driver._id,
+      passenger: user._id,
+    });
+
+    const rideDate = new Date(ride.departureDateTime);
+    const formattedDate = rideDate.toLocaleDateString("fr-FR");
+    const formattedTime = rideDate.toLocaleTimeString("fr-FR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const departureText = ride.departureAddress || "";
+    const destinationText = ride.destinationAddress || "";
+
+    const passengerRating =
+      typeof user.averageRating === "number"
+        ? user.averageRating.toFixed(1)
+        : "N/A";
+
+    const driverMessage =
+      `Bonjour, ${user.firstname || "Un passager"} ⭐ ${passengerRating} vient de réserver une place sur votre trajet ${departureText} → ${destinationText}, prévu le ${formattedDate} à ${formattedTime}.`;
+
+    const passengerMessage =
+      `Merci d’avoir réservé votre trajet avec ${driverFullName}. Vous pouvez lui écrire via ce chat si besoin.`;
+
+    if (!conversation) {
+      conversation = await Conversation.create({
+        ride: ride._id,
+        driver: driver._id,
+        passenger: user._id,
+        driverName: driverFullName,
+        passengerName: passengerFullName,
+        lastMessagePreviewDriver: driverMessage,
+        lastMessagePreviewPassenger: passengerMessage,
+        lastMessageAt: new Date(),
+      });
+    } else {
+      conversation.lastMessagePreviewDriver = driverMessage;
+      conversation.lastMessagePreviewPassenger = passengerMessage;
+      conversation.lastMessageAt = new Date();
+      await conversation.save();
+    }
+
+    await Message.create({
+      conversation: conversation._id,
+      type: "system",
+      sender: null,
+      content: driverMessage,
+      visibleTo: "driver_only",
+    });
+
+    await Message.create({
+      conversation: conversation._id,
+      type: "system",
+      sender: null,
+      content: passengerMessage,
+      visibleTo: "passenger_only",
+    });
+
     res.json({
       result: true,
       booking: savedBooking,
+      conversationId: conversation._id,
       message: "Réservation créée avec succès",
     });
   } catch (err) {

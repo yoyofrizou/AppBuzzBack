@@ -13,6 +13,9 @@ var usersRouter = require("./routes/users");
 const paymentsRouter = require("./routes/payments");
 const bookingsRouter = require("./routes/bookings");
 const ridesRouter = require("./routes/rides");
+const ratesRouter = require("./routes/rates");
+const conversationsRouter = require("./routes/conversations");
+const messagesRouter = require("./routes/messages");
 
 const User = require("./models/users");
 
@@ -21,7 +24,6 @@ var app = express();
 mongoose
   .connect(process.env.CONNECTION_STRING)
   .then(() => { console.log("Database connected");
- console.log("Mongo DB users:", mongoose.connection.users);
   })
   .catch((error) => console.error("MongoDB connection error:", error));
 
@@ -46,6 +48,9 @@ app.use("/users", usersRouter);
 app.use("/payments", paymentsRouter);
 app.use("/bookings", bookingsRouter);
 app.use("/rides", ridesRouter);
+app.use("/rates", ratesRouter);
+app.use("/conversations", conversationsRouter);
+app.use("/messages", messagesRouter);
 
 app.use(function (req, res, next) {
   next(createError(404));

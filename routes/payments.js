@@ -21,9 +21,9 @@ router.post("/setup-intent", async (req, res) => {
       const customer = await stripe.customers.create({
         email: user.email || undefined,
         name:
-          user.firstname && user.lastname
-            ? `${user.firstname} ${user.lastname}`
-            : undefined,
+  user.prenom && user.nom
+    ? `${user.prenom} ${user.nom}`
+    : undefined,
         metadata: { userId: String(user._id) },
       });
 
@@ -288,7 +288,7 @@ router.get("/history/:token", async (req, res) => {
       .sort({ updatedAt: -1 });
 
     const history = bookings.map((booking) => ({
-      id: booking._id,
+      _id: booking._id,
       title: booking.ride
         ? `${booking.ride.departure} → ${booking.ride.arrival}`
         : "Trajet",

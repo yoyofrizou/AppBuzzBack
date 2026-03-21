@@ -1,6 +1,8 @@
 const Ride = require("../models/rides");
 const User = require("../models/users");
 const Booking = require("../models/bookings");
+const Conversation = require("../models/conversations");
+const Message = require("../models/messages");
 
 //
 // ======================
@@ -29,7 +31,12 @@ function getPassengerTripCategory(booking) {
 
   if (ride.status === "completed") return "past";
 
-  if (booking.passengerPresenceStatus === "scanned") return "current";
+  if (
+    booking.passengerPresenceStatus === "scanned" ||
+    booking.passengerPresenceStatus === "manual"
+  ) {
+    return "current";
+  }
 
   return "upcoming";
 }
@@ -39,7 +46,9 @@ function canDriverStartRide(passengers = []) {
   if (!passengers.length) return false;
 
   return passengers.every((booking) =>
-    ["scanned", "absent"].includes(booking.passengerPresenceStatus)
+    ["scanned", "manual", "absent"].includes(
+      booking.passengerPresenceStatus
+    )
   );
 }
 
@@ -73,6 +82,17 @@ function normalizePassengerUser(userDoc) {
     username: userDoc.username || "",
     email: userDoc.email || "",
     profilePhoto: userDoc.profilePhoto || null,
+  };
+}
+
+// enrich ride pour le front
+function enrichRideForFrontend(rideDoc) {
+  const ride = rideDoc?.toObject ? rideDoc.toObject() : rideDoc;
+
+  return {
+    ...ride,
+    driver: normalizeDriverUser(ride.user),
+    tripCategory: getTripCategoryFromRide(ride),
   };
 }
 
@@ -366,6 +386,7 @@ exports.scanPassengerBooking = async (req, res) => {
 
     booking.passengerPresenceStatus = "scanned";
     booking.scannedAt = new Date();
+    booking.manualValidatedAt = null;
     booking.absentMarkedAt = null;
     await booking.save();
 
@@ -388,6 +409,86 @@ exports.scanPassengerBooking = async (req, res) => {
     return res.status(500).json({
       result: false,
       error: "Impossible de valider le QR code.",
+    });
+  }
+};
+
+exports.validatePassengerManually = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const booking = await Booking.findById(bookingId).populate({
+      path: "ride",
+      populate: {
+        path: "user",
+        select: "firstname lastname prenom nom username email profilePhoto car",
+      },
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        result: false,
+        error: "Réservation introuvable.",
+      });
+    }
+
+    if (booking.status === "cancelled") {
+      return res.status(400).json({
+        result: false,
+        error: "Réservation annulée.",
+      });
+    }
+
+    booking.passengerPresenceStatus = "manual";
+    booking.manualValidatedAt = new Date();
+    booking.scannedAt = null;
+    booking.absentMarkedAt = null;
+
+    await booking.save();
+
+    const conversation = await Conversation.findOne({
+  ride: booking.ride._id,
+  passenger: booking.user,
+});
+
+if (conversation) {
+  const systemMessageContent =
+    "Présence validée manuellement par le conducteur. Vérifiez la plaque, le véhicule et l’identité du chauffeur avant de monter.";
+
+  await Message.create({
+    conversation: conversation._id,
+    type: "system",
+    sender: null,
+    content: systemMessageContent,
+    visibleTo: "both",
+  });
+
+  conversation.lastMessageAt = new Date();
+  conversation.lastMessagePreviewDriver = systemMessageContent;
+  conversation.lastMessagePreviewPassenger = systemMessageContent;
+
+  await conversation.save();
+}
+
+    const enrichedRide = enrichRideForFrontend(booking.ride);
+
+    return res.json({
+      result: true,
+      message: "Passager validé manuellement.",
+      booking: {
+        ...booking.toObject(),
+        ride: enrichedRide,
+        tripCategory: getPassengerTripCategory({
+          ...booking.toObject(),
+          ride: enrichedRide,
+        }),
+      },
+    });
+  } catch (error) {
+    console.error("validatePassengerManually controller error:", error);
+    return res.status(500).json({
+      result: false,
+      error: "Impossible de valider manuellement le passager.",
     });
   }
 };
@@ -427,6 +528,7 @@ exports.markPassengerAbsent = async (req, res) => {
     booking.passengerPresenceStatus = "absent";
     booking.absentMarkedAt = new Date();
     booking.scannedAt = null;
+    booking.manualValidatedAt = null;
     await booking.save();
 
     const enrichedRide = enrichRideForFrontend(booking.ride);
@@ -484,8 +586,8 @@ exports.startRide = async (req, res) => {
     const allPassengersHandled =
       passengersBookings.length > 0 &&
       passengersBookings.every((booking) =>
-        ["scanned", "absent"].includes(booking.passengerPresenceStatus)
-      );
+  ["scanned", "manual", "absent"].includes(booking.passengerPresenceStatus)
+);
 
     if (!allPassengersHandled) {
       return res.json({

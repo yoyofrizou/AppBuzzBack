@@ -28,9 +28,9 @@ router.get("/available", async (req, res) => {
       status: { $in: ["published", "open"] },
     })
       .populate(
-        "user",
-        "firstname lastname prenom nom username profilePhoto car"
-      )
+  "user",
+  "firstname lastname prenom nom username profilePhoto car driverAverageRating driverRatingsCount"
+)
       .sort({ departureDateTime: 1 });
 
     return res.json({
@@ -102,10 +102,10 @@ router.get("/search", async (req, res) => {
     }
 
     const rides = await Ride.find(filters)
-      .populate(
-        "user",
-        "firstname lastname prenom nom username profilePhoto car"
-      )
+     .populate(
+  "user",
+  "firstname lastname prenom nom username profilePhoto car driverAverageRating driverRatingsCount"
+)
       .sort({ departureDateTime: 1 });
 
     return res.json({
@@ -146,6 +146,11 @@ router.post(
   ridesController.scanPassengerBooking
 );
 
+router.post(
+  "/bookings/:bookingId/manual-validate",
+  ridesController.validatePassengerManually
+);
+
 //
 // POST marquer un passager absent
 //
@@ -153,7 +158,6 @@ router.post(
   "/bookings/:bookingId/mark-absent",
   ridesController.markPassengerAbsent
 );
-
 //
 // POST démarrer un trajet
 // bloqué tant que tous les passagers ne sont pas traités

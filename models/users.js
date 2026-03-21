@@ -10,6 +10,25 @@ const carSchema = mongoose.Schema({
     uppercase: true,
     trim: true,
   },
+  driverAverageRating: {
+  type: Number,
+  default: 0,
+},
+
+driverRatingsCount: {
+  type: Number,
+  default: 0,
+},
+
+passengerAverageRating: {
+  type: Number,
+  default: 0,
+},
+
+passengerRatingsCount: {
+  type: Number,
+  default: 0,
+},
 });
 
 const driverProfileSchema = mongoose.Schema({
@@ -33,14 +52,17 @@ const userSchema = new mongoose.Schema({
   profilePhoto: { type: String, default: null },
 
   car: { type: carSchema, default: null },
-  driverProfile: { type: driverProfileSchema, default: {},
+
+  driverProfile: {
+    type: driverProfileSchema,
+    default: {},
+  },
 
   stripeCustomerId: { type: String, default: null },
   defaultPaymentMethodId: { type: String, default: null },
 
   resetPasswordToken: { type: String, default: null },
   resetPasswordExpires: { type: Date, default: null },
-},
 });
 
 module.exports = mongoose.model("users", userSchema);
