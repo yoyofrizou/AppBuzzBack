@@ -21,11 +21,18 @@ const User = require("./models/users");
 
 var app = express();
 
+console.log("CONNECTION_STRING =", process.env.CONNECTION_STRING);
+
 mongoose
+  .connect(process.env.CONNECTION_STRING)
+  .then(() => { console.log("Database connected"); })
+  .catch((error) => console.error("MongoDB connection error:", error));
+
+/*mongoose
   .connect(process.env.CONNECTION_STRING)
   .then(() => { console.log("Database connected");
   })
-  .catch((error) => console.error("MongoDB connection error:", error));
+  .catch((error) => console.error("MongoDB connection error:", error));*/
 
 app.use(cors());
 app.use(logger("dev"));
