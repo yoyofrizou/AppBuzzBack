@@ -10,6 +10,15 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
+router.get("/", async (req, res) => {
+  try {
+    const rides = await Ride.find();
+    res.json({ result: true, rides });
+  } catch (error) {
+    res.status(500).json({ result: false, error: error.message });
+  }
+});
+
 //
 // POST créer un trajet
 //

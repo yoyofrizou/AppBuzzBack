@@ -30,6 +30,15 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+router.get("/", async (req, res) => {
+  try {
+    const users = await User.find();
+    res.json({ result: true, users });
+  } catch (error) {
+    res.status(500).json({ result: false, error: error.message });
+  }
+});
+
 router.post("/register", async (req, res) => {
   const photoPath = `/tmp/${uniqid()}.jpg`;
 

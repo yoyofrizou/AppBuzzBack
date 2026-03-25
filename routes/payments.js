@@ -7,6 +7,13 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
+router.get("/", async (req, res) => {
+  res.json({
+    result: true,
+    message: "payments route is working",
+  });
+});
+
 // 1) SetupIntent + EphemeralKey pour enregistrer une carte
 router.post("/setup-intent", async (req, res) => {
   try {

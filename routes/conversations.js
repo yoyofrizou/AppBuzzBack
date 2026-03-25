@@ -5,6 +5,13 @@ const Conversation = require("../models/conversations");
 const User = require("../models/users");
 const Ride = require("../models/rides");
 
+router.get("/", async (req, res) => {
+  res.json({
+    result: true,
+    message: "conversations route is working",
+  });
+});
+
 router.get("/:token", async (req, res) => {
   try {
     const user = await User.findOne({ token: req.params.token });

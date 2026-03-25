@@ -4,6 +4,12 @@ const router = express.Router();
 const Rate = require("../models/rates");
 const User = require("../models/users");
 
+router.get("/", async (req, res) => {
+  res.json({
+    result: true,
+    message: "rates route is working",
+  });
+});
 
 // PASSAGER -> note le conducteur
 router.post("/rate-driver", async (req, res) => {

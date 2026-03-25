@@ -5,6 +5,13 @@ const Message = require("../models/messages");
 const Conversation = require("../models/conversations");
 const User = require("../models/users");
 
+router.get("/", async (req, res) => {
+  res.json({
+    result: true,
+    message: "messages route is working",
+  });
+});
+
 router.get("/:conversationId/:token", async (req, res) => {
   try {
     const user = await User.findOne({ token: req.params.token });
