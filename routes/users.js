@@ -40,10 +40,10 @@ router.post("/test-create", async (req, res) => {
     const hash = bcrypt.hashSync("123456", 10);
 
     const newUser = new User({
-      prenom: "Test",
-      nom: "User",
-      email: "test@test.com",
-      telephone: "0600000000",
+      prenom: req.body.prenom,
+      nom: req.body.nom,
+      email: req.body.email,
+      telephone: req.body.telephone,
       password: hash,
       token: uid2(32),
       profilePhoto: "https://via.placeholder.com/150",
