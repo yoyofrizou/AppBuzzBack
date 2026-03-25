@@ -1,10 +1,6 @@
 var express = require("express");
 var router = express.Router();
 
-router.get("/", function (req, res, next) {
-  res.send("respond with a resource");
-});
-
 const User = require("../models/users");
 const { checkBody } = require("../modules/checkBody");
 const uid2 = require("uid2");
@@ -34,6 +30,39 @@ router.get("/", async (req, res) => {
   try {
     const users = await User.find();
     res.json({ result: true, users });
+  } catch (error) {
+    res.status(500).json({ result: false, error: error.message });
+  }
+});
+
+router.post("/test-create", async (req, res) => {
+  try {
+    const hash = bcrypt.hashSync("123456", 10);
+
+    const newUser = new User({
+      prenom: "Test",
+      nom: "User",
+      email: "test@test.com",
+      telephone: "0600000000",
+      password: hash,
+      token: uid2(32),
+      profilePhoto: "https://via.placeholder.com/150",
+      stripeCustomerId: null,
+      defaultPaymentMethodId: null,
+      car: null,
+      photos: [],
+      driverProfile: {
+        driverLicenseUrl: null,
+        identityDocumentUrl: null,
+        insuranceDocumentUrl: null,
+        isProfileComplete: false,
+        isVerified: false,
+      },
+    });
+
+    const savedUser = await newUser.save();
+
+    res.json({ result: true, user: savedUser });
   } catch (error) {
     res.status(500).json({ result: false, error: error.message });
   }
