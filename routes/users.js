@@ -72,6 +72,8 @@ router.post("/register", async (req, res) => {
   const photoPath = `/tmp/${uniqid()}.jpg`;
 
   try {
+    console.log("REGISTER BODY =", req.body);
+    console.log("REGISTER FILES =", req.files);
 
     if (
       !checkBody(req.body, [
