@@ -79,19 +79,19 @@ router.post("/add", async (req, res) => {
 
     const ride = await Ride.findById(rideId).populate(
       "user",
-      "firstname lastname averageRating"
+      "firstname lastname prenom nom username profilePhoto car averageRating"
     );
 
     if (!ride) {
       return res.json({ result: false, error: "Trajet non trouvé" });
     }
 
-    if (ride.status !== "open") {
-      return res.json({
-        result: false,
-        error: "Le trajet n'est plus réservable",
-      });
-    }
+    if (ride.status !== "open" && ride.status !== "published") {
+  return res.json({
+    result: false,
+    error: "Le trajet n'est plus réservable",
+  });
+}
 
     const parsedSeatsBooked = Number(seatsBooked) || 1;
 
@@ -245,6 +245,13 @@ router.delete("/delete/:bookingId", async (req, res) => {
       });
     }
 
+     if (booking.status === "captured") {
+      return res.json({
+        result: false,
+        error: "Impossible d'annuler une réservation déjà capturée.",
+      });
+    }
+
     // Si la préautorisation existe encore, on l'annule
     if (booking.paymentIntentId && booking.status === "authorized") {
       try {
@@ -260,8 +267,9 @@ router.delete("/delete/:bookingId", async (req, res) => {
       await ride.save();
     }
 
-    booking.status = "cancelled";
-    await booking.save();
+   booking.status = "cancelled";
+booking.finalAmount = 0;
+await booking.save();
 
     res.json({
       result: true,

@@ -10,12 +10,41 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
+function toRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function getDistanceMeters(lat1, lon1, lat2, lon2) {
+  const earthRadius = 6371000;
+
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) *
+      Math.cos(toRadians(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return earthRadius * c;
+}
+
+function minutesToMeters(minutes) {
+  return minutes * 150;
+}
+
 router.get("/", async (req, res) => {
   try {
     const rides = await Ride.find();
-    res.json({ result: true, rides });
+    return res.json({ result: true, rides });
   } catch (error) {
-    res.status(500).json({ result: false, error: error.message });
+    return res.status(500).json({
+      result: false,
+      error: error.message,
+    });
   }
 });
 
@@ -37,9 +66,9 @@ router.get("/available", async (req, res) => {
       status: { $in: ["published", "open"] },
     })
       .populate(
-  "user",
-  "firstname lastname prenom nom username profilePhoto car driverAverageRating driverRatingsCount"
-)
+        "user",
+        "firstname lastname prenom nom username profilePhoto car driverAverageRating driverRatingsCount"
+      )
       .sort({ departureDateTime: 1 });
 
     return res.json({
@@ -63,8 +92,14 @@ router.get("/search", async (req, res) => {
     const departure = req.query.departure?.trim() || "";
     const destination = req.query.destination?.trim() || "";
     const dateTime = req.query.dateTime?.trim() || "";
-    const pickupWalkMinutes = Number(req.query.pickupWalkMinutes) || 0;
-    const dropoffWalkMinutes = Number(req.query.dropoffWalkMinutes) || 0;
+
+    const departureLat = Number(req.query.departureLat);
+    const departureLng = Number(req.query.departureLng);
+    const destinationLat = Number(req.query.destinationLat);
+    const destinationLng = Number(req.query.destinationLng);
+
+    const pickupWalkMinutes = Number(req.query.pickupWalkMinutes) || 5;
+    const dropoffWalkMinutes = Number(req.query.dropoffWalkMinutes) || 10;
 
     if (!departure || !destination) {
       return res.json({
@@ -73,21 +108,27 @@ router.get("/search", async (req, res) => {
       });
     }
 
+    if (
+      Number.isNaN(departureLat) ||
+      Number.isNaN(departureLng) ||
+      Number.isNaN(destinationLat) ||
+      Number.isNaN(destinationLng)
+    ) {
+      return res.json({
+        result: false,
+        error:
+          "Les coordonnées de départ et d’arrivée sont obligatoires pour la recherche.",
+      });
+    }
+
+    // Le passager décide de sa marche acceptable.
+    // On convertit juste ses minutes en mètres.
+    const pickupRadiusMeters = minutesToMeters(pickupWalkMinutes);
+    const dropoffRadiusMeters = minutesToMeters(dropoffWalkMinutes);
+
     const filters = {
-      $and: [
-        {
-          departureAddress: { $regex: departure, $options: "i" },
-        },
-        {
-          destinationAddress: { $regex: destination, $options: "i" },
-        },
-        {
-          placesLeft: { $gt: 0 },
-        },
-        {
-          status: { $in: ["published", "open"] },
-        },
-      ],
+      placesLeft: { $gt: 0 },
+      status: { $in: ["published", "open"] },
     };
 
     if (dateTime) {
@@ -97,35 +138,103 @@ router.get("/search", async (req, res) => {
         const startWindow = new Date(requestedDate.getTime() - 15 * 60 * 1000);
         const endWindow = new Date(requestedDate.getTime() + 15 * 60 * 1000);
 
-        filters.$and.push({
-          departureDateTime: {
-            $gte: startWindow,
-            $lte: endWindow,
-          },
-        });
+        filters.departureDateTime = {
+          $gte: startWindow,
+          $lte: endWindow,
+        };
       }
     } else {
-      filters.$and.push({
-        departureDateTime: { $gte: new Date() },
-      });
+      filters.departureDateTime = { $gte: new Date() };
     }
 
     const rides = await Ride.find(filters)
-     .populate(
-  "user",
-  "firstname lastname prenom nom username profilePhoto car driverAverageRating driverRatingsCount"
-)
+      .populate(
+        "user",
+        "firstname lastname prenom nom username profilePhoto car driverAverageRating driverRatingsCount"
+      )
       .sort({ departureDateTime: 1 });
+
+    const matchedRides = rides
+      .map((ride) => {
+        const rideDepartureLat = Number(ride.departureLatitude);
+        const rideDepartureLng = Number(ride.departureLongitude);
+        const rideDestinationLat = Number(ride.destinationLatitude);
+        const rideDestinationLng = Number(ride.destinationLongitude);
+
+        if (
+          Number.isNaN(rideDepartureLat) ||
+          Number.isNaN(rideDepartureLng) ||
+          Number.isNaN(rideDestinationLat) ||
+          Number.isNaN(rideDestinationLng)
+        ) {
+          return null;
+        }
+
+        const departureDistanceMeters = getDistanceMeters(
+          departureLat,
+          departureLng,
+          rideDepartureLat,
+          rideDepartureLng
+        );
+
+        const destinationDistanceMeters = getDistanceMeters(
+          destinationLat,
+          destinationLng,
+          rideDestinationLat,
+          rideDestinationLng
+        );
+
+        const matchesDeparture =
+          departureDistanceMeters <= pickupRadiusMeters;
+        const matchesDestination =
+          destinationDistanceMeters <= dropoffRadiusMeters;
+
+        // Tolérance légère pour éviter l'effet "adresse exacte obligatoire".
+        const closeEnoughOverall =
+          departureDistanceMeters + destinationDistanceMeters <=
+          pickupRadiusMeters + dropoffRadiusMeters + 500;
+
+        console.log("SEARCH DEBUG", {
+          rideId: ride._id,
+          departureAddress: ride.departureAddress,
+          destinationAddress: ride.destinationAddress,
+          departureDistanceMeters: Math.round(departureDistanceMeters),
+          destinationDistanceMeters: Math.round(destinationDistanceMeters),
+          pickupRadiusMeters,
+          dropoffRadiusMeters,
+          matchesDeparture,
+          matchesDestination,
+          closeEnoughOverall,
+        });
+
+        if ((!matchesDeparture || !matchesDestination) && !closeEnoughOverall) {
+          return null;
+        }
+
+        return {
+          ...ride.toObject(),
+          departureDistanceMeters: Math.round(departureDistanceMeters),
+          destinationDistanceMeters: Math.round(destinationDistanceMeters),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        const aScore = a.departureDistanceMeters + a.destinationDistanceMeters;
+        const bScore = b.departureDistanceMeters + b.destinationDistanceMeters;
+        return aScore - bScore;
+      });
 
     return res.json({
       result: true,
-      rides,
+      rides: matchedRides,
       searchMeta: {
         departure,
         destination,
         dateTime,
         pickupWalkMinutes,
         dropoffWalkMinutes,
+        pickupRadiusMeters,
+        dropoffRadiusMeters,
       },
     });
   } catch (error) {
@@ -155,6 +264,9 @@ router.post(
   ridesController.scanPassengerBooking
 );
 
+//
+// POST validation manuelle
+//
 router.post(
   "/bookings/:bookingId/manual-validate",
   ridesController.validatePassengerManually
@@ -167,15 +279,20 @@ router.post(
   "/bookings/:bookingId/mark-absent",
   ridesController.markPassengerAbsent
 );
+
 //
 // POST démarrer un trajet
 // bloqué tant que tous les passagers ne sont pas traités
 //
 router.post("/:id/start", ridesController.startRide);
 
-router.patch("/:id/location", ridesController.updateRideLocation) //suivi
 //
-// POST terminer un trajet + capturer les paiements
+// PATCH mise à jour localisation conducteur pendant le trajet
+//
+router.patch("/:id/location", ridesController.updateRideLocation);
+
+//
+// POST terminer un trajet
 //
 router.post("/:id/complete", async (req, res) => {
   try {
@@ -188,52 +305,11 @@ router.post("/:id/complete", async (req, res) => {
       });
     }
 
-    if (
-      ride.status !== "published" &&
-      ride.status !== "open" &&
-      ride.status !== "started"
-    ) {
+    if (ride.status !== "started") {
       return res.json({
         result: false,
-        error: "Trajet non terminable",
+        error: "Seul un trajet démarré peut être terminé",
       });
-    }
-
-    const bookings = await Booking.find({
-      ride: ride._id,
-      status: "authorized",
-    });
-
-    if (bookings.length === 0) {
-      ride.status = "completed";
-      await ride.save();
-
-      return res.json({
-        result: true,
-        message: "Trajet terminé sans paiement à capturer",
-        finalPricePerSeat: 0,
-      });
-    }
-
-    let totalPassengers = 0;
-    for (const booking of bookings) {
-      totalPassengers += booking.seatsBooked;
-    }
-
-    const finalPricePerSeat = Math.floor(
-      ride.totalCost / (totalPassengers + 1)
-    );
-
-    for (const booking of bookings) {
-      const finalAmount = finalPricePerSeat * booking.seatsBooked;
-
-      await stripe.paymentIntents.capture(booking.paymentIntentId, {
-        amount_to_capture: finalAmount,
-      });
-
-      booking.status = "captured";
-      booking.finalAmount = finalAmount;
-      await booking.save();
     }
 
     ride.status = "completed";
@@ -241,8 +317,8 @@ router.post("/:id/complete", async (req, res) => {
 
     return res.json({
       result: true,
-      message: "Trajet terminé et paiements capturés",
-      finalPricePerSeat,
+      message: "Trajet terminé",
+      ride,
     });
   } catch (error) {
     console.error("POST /rides/:id/complete error:", error);

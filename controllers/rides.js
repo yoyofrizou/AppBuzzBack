@@ -3,6 +3,79 @@ const User = require("../models/users");
 const Booking = require("../models/bookings");
 const Conversation = require("../models/conversations");
 const Message = require("../models/messages");
+const Stripe = require("stripe");
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
+});
+
+//
+// ======================
+// 💰 CAPTURE PAIEMENTS
+// ======================
+//
+
+async function captureRidePaymentsForPresentPassengers(rideId) {
+  const ride = await Ride.findById(rideId);
+
+  if (!ride) throw new Error("Trajet introuvable");
+
+  const bookings = await Booking.find({
+    ride: ride._id,
+    status: "authorized",
+  });
+
+  // ❌ absents → annulation
+  const absentBookings = bookings.filter(
+    (b) => b.passengerPresenceStatus === "absent"
+  );
+
+  for (const booking of absentBookings) {
+    if (booking.paymentIntentId) {
+      try {
+        await stripe.paymentIntents.cancel(booking.paymentIntentId);
+      } catch (err) {
+        console.log("Erreur cancel:", err.message);
+      }
+    }
+
+    booking.status = "cancelled";
+    booking.finalAmount = 0;
+    await booking.save();
+  }
+
+  // ✅ présents
+  const presentBookings = bookings.filter((b) =>
+    ["scanned", "manual"].includes(b.passengerPresenceStatus)
+  );
+
+  if (presentBookings.length === 0) {
+    return { finalPricePerSeat: 0, countedPassengers: 0 };
+  }
+
+  let totalPassengers = 0;
+  presentBookings.forEach((b) => {
+    totalPassengers += b.seatsBooked;
+  });
+
+  const finalPricePerSeat = Math.floor(
+    ride.totalCost / (totalPassengers + 1)
+  );
+
+  for (const booking of presentBookings) {
+    const finalAmount = finalPricePerSeat * booking.seatsBooked;
+
+    await stripe.paymentIntents.capture(booking.paymentIntentId, {
+      amount_to_capture: finalAmount,
+    });
+
+    booking.status = "captured";
+    booking.finalAmount = finalAmount;
+    await booking.save();
+  }
+
+  return { finalPricePerSeat, countedPassengers: totalPassengers };
+}
 
 //
 // ======================
@@ -10,12 +83,10 @@ const Message = require("../models/messages");
 // ======================
 //
 
-// catégorie côté conducteur
 function getTripCategoryFromRide(ride) {
   if (!ride) return "upcoming";
 
-  if (ride.status === "open") return "upcoming";
-  if (ride.status === "published") return "upcoming";
+  if (["open", "published"].includes(ride.status)) return "upcoming";
   if (ride.status === "started") return "current";
   if (ride.status === "completed") return "past";
   if (ride.status === "cancelled") return "cancelled";
@@ -23,37 +94,30 @@ function getTripCategoryFromRide(ride) {
   return "upcoming";
 }
 
-// catégorie côté passager
 function getPassengerTripCategory(booking) {
   const ride = booking?.ride;
 
   if (!ride) return "upcoming";
-
   if (ride.status === "completed") return "past";
 
-  if (
-    booking.passengerPresenceStatus === "scanned" ||
-    booking.passengerPresenceStatus === "manual"
-  ) {
+  if (["scanned", "manual"].includes(booking.passengerPresenceStatus)) {
     return "current";
   }
 
   return "upcoming";
 }
 
-// logique démarrage conducteur
 function canDriverStartRide(passengers = []) {
   if (!passengers.length) return false;
 
-  return passengers.every((booking) =>
+  return passengers.every((b) =>
     ["scanned", "manual", "absent"].includes(
-      booking.passengerPresenceStatus
+      b.passengerPresenceStatus
     )
   );
 }
 
-// normalisation conducteur
-function normalizeDriverUser(userDoc) {
+function normalizeUser(userDoc, isDriver = false) {
   if (!userDoc) return null;
 
   return {
@@ -65,44 +129,16 @@ function normalizeDriverUser(userDoc) {
     username: userDoc.username || "",
     email: userDoc.email || "",
     profilePhoto: userDoc.profilePhoto || null,
-    car: userDoc.car || null,
+    ...(isDriver && { car: userDoc.car || null }),
   };
 }
 
-// normalisation passager
-function normalizePassengerUser(userDoc) {
-  if (!userDoc) return null;
-
-  return {
-    _id: userDoc._id,
-    firstname: userDoc.firstname || "",
-    lastname: userDoc.lastname || "",
-    prenom: userDoc.prenom || userDoc.firstname || "",
-    nom: userDoc.nom || userDoc.lastname || "",
-    username: userDoc.username || "",
-    email: userDoc.email || "",
-    profilePhoto: userDoc.profilePhoto || null,
-  };
-}
-
-// enrich ride pour le front
 function enrichRideForFrontend(rideDoc) {
   const ride = rideDoc?.toObject ? rideDoc.toObject() : rideDoc;
 
   return {
     ...ride,
-    driver: normalizeDriverUser(ride.user),
-    tripCategory: getTripCategoryFromRide(ride),
-  };
-}
-
-// enrich ride pour le front
-function enrichRideForFrontend(rideDoc) {
-  const ride = rideDoc?.toObject ? rideDoc.toObject() : rideDoc;
-
-  return {
-    ...ride,
-    driver: normalizeDriverUser(ride.user),
+    driver: normalizeUser(ride.user, true),
     tripCategory: getTripCategoryFromRide(ride),
   };
 }
@@ -140,79 +176,44 @@ exports.createRide = async (req, res) => {
       destinationLongitude === undefined ||
       !departureDateTime
     ) {
-      return res.json({
-        result: false,
-        error: "Champs manquants pour créer le trajet.",
-      });
+      return res.json({ result: false, error: "Champs manquants." });
     }
 
     const user = await User.findOne({ token });
+    if (!user) return res.json({ result: false, error: "User introuvable" });
 
-    if (!user) {
-      return res.json({
-        result: false,
-        error: "Utilisateur introuvable.",
-      });
-    }
-
-    const parsedSeats = Number(availableSeats) || 1;
-    const parsedPrice = Number(price) || 0;
-
-    if (parsedSeats <= 0) {
-      return res.json({
-        result: false,
-        error: "Le nombre de places doit être supérieur à 0.",
-      });
-    }
-
-    if (parsedPrice < 0) {
-      return res.json({
-        result: false,
-        error: "Le prix est invalide.",
-      });
-    }
+    const seats = Math.max(Number(availableSeats) || 1, 1);
+    const priceValue = Math.max(Number(price) || 0, 0);
 
     const newRide = new Ride({
       user: user._id,
-
-      departureAddress: departureAddress.trim(),
-      destinationAddress: destinationAddress.trim(),
-
-      departureLatitude: Number(departureLatitude),
-      departureLongitude: Number(departureLongitude),
-      destinationLatitude: Number(destinationLatitude),
-      destinationLongitude: Number(destinationLongitude),
-
+      departureAddress,
+      destinationAddress,
+      departureLatitude,
+      departureLongitude,
+      destinationLatitude,
+      destinationLongitude,
       departureDateTime: new Date(departureDateTime),
-
       pickupWalkMinutes: Number(pickupWalkMinutes) || 0,
       dropoffWalkMinutes: Number(dropoffWalkMinutes) || 0,
-
-      price: parsedPrice,
-      placesTotal: parsedSeats,
-      placesLeft: parsedSeats,
-      totalCost: Math.round(parsedPrice * 100),
+      price: priceValue,
+      placesTotal: seats,
+      placesLeft: seats,
+      totalCost: Math.round(priceValue * 100),
       status: "published",
     });
 
     const savedRide = await newRide.save();
 
-    const populatedRide = await Ride.findById(savedRide._id).populate(
-      "user",
-      "firstname lastname prenom nom username email profilePhoto car"
-    );
+    const populated = await Ride.findById(savedRide._id).populate("user");
 
-    return res.json({
+    res.json({
       result: true,
-      message: "Trajet créé avec succès.",
-      ride: enrichRideForFrontend(populatedRide),
+      ride: enrichRideForFrontend(populated),
     });
   } catch (error) {
-    console.error("createRide controller error:", error);
-    return res.status(500).json({
-      result: false,
-      error: error.message || "Erreur serveur.",
-    });
+    console.error(error);
+    res.status(500).json({ result: false, error: error.message });
   }
 };
 
@@ -225,332 +226,123 @@ exports.createRide = async (req, res) => {
 exports.getDriverTrips = async (req, res) => {
   try {
     const user = await User.findOne({ token: req.params.token });
-
-    if (!user) {
-      return res.json({
-        result: false,
-        error: "Utilisateur introuvable.",
-      });
-    }
+    if (!user) return res.json({ result: false });
 
     const rides = await Ride.find({ user: user._id })
-      .populate(
-        "user",
-        "firstname lastname prenom nom username email profilePhoto car"
-      )
+      .populate("user")
       .sort({ departureDateTime: -1 });
 
-    const enrichedRides = [];
+    const enriched = [];
 
     for (const rideDoc of rides) {
-      const bookingDocs = await Booking.find({
+      const bookings = await Booking.find({
         ride: rideDoc._id,
         status: { $in: ["authorized", "captured"] },
-      })
-        .populate(
-          "user",
-          "firstname lastname prenom nom username email profilePhoto"
-        )
-        .sort({ createdAt: 1 });
+      }).populate("user");
 
-      const passengers = bookingDocs.map((bookingDoc) => {
-        const booking = bookingDoc.toObject();
-
-        return {
-          ...booking,
-          passenger: normalizePassengerUser(booking.user),
-        };
-      });
+      const passengers = bookings.map((b) => ({
+        ...b.toObject(),
+        passenger: normalizeUser(b.user),
+      }));
 
       const ride = enrichRideForFrontend(rideDoc);
 
-      enrichedRides.push({
+      enriched.push({
         ...ride,
         passengers,
         canStartRide: canDriverStartRide(passengers),
       });
     }
 
-    return res.json({
-      result: true,
-      rides: enrichedRides,
-    });
+    res.json({ result: true, rides: enriched });
   } catch (error) {
-    console.error("getDriverTrips controller error:", error);
-    return res.status(500).json({
-      result: false,
-      error: "Erreur serveur.",
-    });
+    res.status(500).json({ result: false, error: "Erreur serveur" });
   }
 };
 
 //
 // ======================
-// PASSENGER BOOKINGS
+// BOOKINGS PASSAGER
 // ======================
 //
 
 exports.getPassengerBookings = async (req, res) => {
   try {
-    const token = req.params.token;
-
-    if (!token) {
-      return res.json({
-        result: false,
-        error: "Token manquant.",
-      });
-    }
-
-    const user = await User.findOne({ token });
-
-    if (!user) {
-      return res.json({
-        result: false,
-        error: "Utilisateur introuvable.",
-      });
-    }
+    const user = await User.findOne({ token: req.params.token });
+    if (!user) return res.json({ result: false });
 
     const bookings = await Booking.find({
       user: user._id,
       status: { $in: ["authorized", "captured"] },
-    })
-      .populate({
-        path: "ride",
-        populate: {
-          path: "user",
-          select: "firstname lastname prenom nom username profilePhoto car",
-        },
-      })
-      .sort({ createdAt: -1 });
-
-    const enrichedBookings = bookings
-      .filter((booking) => booking.ride)
-      .map((bookingDoc) => {
-        const booking = bookingDoc.toObject();
-        const enrichedRide = enrichRideForFrontend(booking.ride);
-
-        return {
-          ...booking,
-          ride: enrichedRide,
-          tripCategory: getPassengerTripCategory({
-            ...booking,
-            ride: enrichedRide,
-          }),
-        };
-      });
-
-    return res.json({
-      result: true,
-      bookings: enrichedBookings,
+    }).populate({
+      path: "ride",
+      populate: { path: "user" },
     });
-  } catch (error) {
-    console.error("getPassengerBookings controller error:", error);
-    return res.status(500).json({
-      result: false,
-      error: "Erreur serveur.",
+
+    const result = bookings.map((b) => {
+      const ride = enrichRideForFrontend(b.ride);
+
+      return {
+        ...b.toObject(),
+        ride,
+        tripCategory: getPassengerTripCategory({
+          ...b.toObject(),
+          ride,
+        }),
+      };
     });
+
+    res.json({ result: true, bookings: result });
+  } catch {
+    res.status(500).json({ result: false });
   }
 };
 
 //
 // ======================
-// SCAN PASSENGER QR
+// ACTIONS PASSAGER
 // ======================
 //
 
+async function updatePresence(bookingId, status) {
+  const booking = await Booking.findById(bookingId).populate("ride");
+
+  if (!booking) throw new Error("Booking introuvable");
+
+  booking.passengerPresenceStatus = status;
+  booking.scannedAt = status === "scanned" ? new Date() : null;
+  booking.manualValidatedAt = status === "manual" ? new Date() : null;
+  booking.absentMarkedAt = status === "absent" ? new Date() : null;
+
+  await booking.save();
+
+  return booking;
+}
+
 exports.scanPassengerBooking = async (req, res) => {
   try {
-    const { bookingId } = req.params;
-
-    const booking = await Booking.findById(bookingId).populate({
-      path: "ride",
-      populate: {
-        path: "user",
-        select: "firstname lastname prenom nom username email profilePhoto car",
-      },
-    });
-
-    if (!booking) {
-      return res.status(404).json({
-        result: false,
-        error: "Réservation introuvable.",
-      });
-    }
-
-    if (booking.status === "cancelled") {
-      return res.status(400).json({
-        result: false,
-        error: "Réservation annulée.",
-      });
-    }
-
-    booking.passengerPresenceStatus = "scanned";
-    booking.scannedAt = new Date();
-    booking.manualValidatedAt = null;
-    booking.absentMarkedAt = null;
-    await booking.save();
-
-    const enrichedRide = enrichRideForFrontend(booking.ride);
-
-    return res.json({
-      result: true,
-      message: "QR code validé.",
-      booking: {
-        ...booking.toObject(),
-        ride: enrichedRide,
-        tripCategory: getPassengerTripCategory({
-          ...booking.toObject(),
-          ride: enrichedRide,
-        }),
-      },
-    });
-  } catch (error) {
-    console.error("scanPassengerBooking controller error:", error);
-    return res.status(500).json({
-      result: false,
-      error: "Impossible de valider le QR code.",
-    });
+    const booking = await updatePresence(req.params.bookingId, "scanned");
+    res.json({ result: true, booking });
+  } catch (e) {
+    res.status(500).json({ result: false, error: e.message });
   }
 };
 
 exports.validatePassengerManually = async (req, res) => {
   try {
-    const { bookingId } = req.params;
-
-    const booking = await Booking.findById(bookingId).populate({
-      path: "ride",
-      populate: {
-        path: "user",
-        select: "firstname lastname prenom nom username email profilePhoto car",
-      },
-    });
-
-    if (!booking) {
-      return res.status(404).json({
-        result: false,
-        error: "Réservation introuvable.",
-      });
-    }
-
-    if (booking.status === "cancelled") {
-      return res.status(400).json({
-        result: false,
-        error: "Réservation annulée.",
-      });
-    }
-
-    booking.passengerPresenceStatus = "manual";
-    booking.manualValidatedAt = new Date();
-    booking.scannedAt = null;
-    booking.absentMarkedAt = null;
-
-    await booking.save();
-
-    const conversation = await Conversation.findOne({
-  ride: booking.ride._id,
-  passenger: booking.user,
-});
-
-if (conversation) {
-  const systemMessageContent =
-    "Présence validée manuellement par le conducteur. Vérifiez la plaque, le véhicule et l’identité du chauffeur avant de monter.";
-
-  await Message.create({
-    conversation: conversation._id,
-    type: "system",
-    sender: null,
-    content: systemMessageContent,
-    visibleTo: "both",
-  });
-
-  conversation.lastMessageAt = new Date();
-  conversation.lastMessagePreviewDriver = systemMessageContent;
-  conversation.lastMessagePreviewPassenger = systemMessageContent;
-
-  await conversation.save();
-}
-
-    const enrichedRide = enrichRideForFrontend(booking.ride);
-
-    return res.json({
-      result: true,
-      message: "Passager validé manuellement.",
-      booking: {
-        ...booking.toObject(),
-        ride: enrichedRide,
-        tripCategory: getPassengerTripCategory({
-          ...booking.toObject(),
-          ride: enrichedRide,
-        }),
-      },
-    });
-  } catch (error) {
-    console.error("validatePassengerManually controller error:", error);
-    return res.status(500).json({
-      result: false,
-      error: "Impossible de valider manuellement le passager.",
-    });
+    const booking = await updatePresence(req.params.bookingId, "manual");
+    res.json({ result: true, booking });
+  } catch (e) {
+    res.status(500).json({ result: false });
   }
 };
 
-//
-// ======================
-// MARK PASSENGER ABSENT
-// ======================
-//
-
 exports.markPassengerAbsent = async (req, res) => {
   try {
-    const { bookingId } = req.params;
-
-    const booking = await Booking.findById(bookingId).populate({
-      path: "ride",
-      populate: {
-        path: "user",
-        select: "firstname lastname prenom nom username email profilePhoto car",
-      },
-    });
-
-    if (!booking) {
-      return res.status(404).json({
-        result: false,
-        error: "Réservation introuvable.",
-      });
-    }
-
-    if (booking.status === "cancelled") {
-      return res.status(400).json({
-        result: false,
-        error: "Réservation annulée.",
-      });
-    }
-
-    booking.passengerPresenceStatus = "absent";
-    booking.absentMarkedAt = new Date();
-    booking.scannedAt = null;
-    booking.manualValidatedAt = null;
-    await booking.save();
-
-    const enrichedRide = enrichRideForFrontend(booking.ride);
-
-    return res.json({
-      result: true,
-      message: "Passager marqué absent.",
-      booking: {
-        ...booking.toObject(),
-        ride: enrichedRide,
-        tripCategory: getPassengerTripCategory({
-          ...booking.toObject(),
-          ride: enrichedRide,
-        }),
-      },
-    });
-  } catch (error) {
-    console.error("markPassengerAbsent controller error:", error);
-    return res.status(500).json({
-      result: false,
-      error: "Impossible de marquer le passager absent.",
-    });
+    const booking = await updatePresence(req.params.bookingId, "absent");
+    res.json({ result: true, booking });
+  } catch (e) {
+    res.status(500).json({ result: false });
   }
 };
 
@@ -564,57 +356,47 @@ exports.startRide = async (req, res) => {
   try {
     const ride = await Ride.findById(req.params.id);
 
-    if (!ride) {
-      return res.json({
-        result: false,
-        error: "Trajet introuvable",
-      });
-    }
+    if (!ride) return res.json({ result: false });
 
-    if (ride.status !== "published" && ride.status !== "open") {
-      return res.json({
-        result: false,
-        error: "Le trajet ne peut pas être démarré",
-      });
-    }
-
-    const passengersBookings = await Booking.find({
+    const bookings = await Booking.find({
       ride: ride._id,
       status: { $in: ["authorized", "captured"] },
     });
 
-    const allPassengersHandled =
-      passengersBookings.length > 0 &&
-      passengersBookings.every((booking) =>
-  ["scanned", "manual", "absent"].includes(booking.passengerPresenceStatus)
-);
+    const ready =
+      bookings.length > 0 &&
+      bookings.every((b) =>
+        ["scanned", "manual", "absent"].includes(
+          b.passengerPresenceStatus
+        )
+      );
 
-    if (!allPassengersHandled) {
+    if (!ready) {
       return res.json({
         result: false,
-        error:
-          "Tous les passagers doivent être scannés ou marqués absents avant le démarrage.",
+        error: "Tous les passagers doivent être validés",
       });
     }
+
+    const paymentSummary =
+      await captureRidePaymentsForPresentPassengers(ride._id);
 
     ride.status = "started";
     await ride.save();
 
-    return res.json({
+    res.json({
       result: true,
-      message: "Trajet démarré",
       ride,
+      paymentSummary,
     });
-  } catch (error) {
-    console.error("startRide controller error:", error);
-    return res.status(500).json({
-      result: false,
-      error: error.message || "Erreur serveur.",
-    });
+  } catch (e) {
+    res.status(500).json({ result: false, error: e.message });
   }
 };
 
-// UPDATE RIDE LOCATION
+//
+// ======================
+// UPDATE LOCATION
 // ======================
 //
 
@@ -623,60 +405,25 @@ exports.updateRideLocation = async (req, res) => {
     const { id } = req.params;
     const { token, latitude, longitude } = req.body;
 
-    if (!token || latitude === undefined || longitude === undefined) {
-      return res.status(400).json({
-        result: false,
-        error: "Token, latitude et longitude sont requis.",
-      });
-    }
-
     const user = await User.findOne({ token });
-
-    if (!user) {
-      return res.status(404).json({
-        result: false,
-        error: "Utilisateur introuvable.",
-      });
-    }
 
     const ride = await Ride.findOne({
       _id: id,
       user: user._id,
-    }).populate(
-      "user",
-      "firstname lastname prenom nom username email profilePhoto car"
-    );
+    });
 
-    if (!ride) {
-      return res.status(404).json({
-        result: false,
-        error: "Trajet introuvable.",
-      });
+    if (!ride || ride.status !== "started") {
+      return res.status(400).json({ result: false });
     }
 
-    if (ride.status !== "started") {
-      return res.status(400).json({
-        result: false,
-        error: "La position ne peut être mise à jour que pour un trajet démarré.",
-      });
-    }
-
-    ride.currentLatitude = Number(latitude);
-    ride.currentLongitude = Number(longitude);
+    ride.currentLatitude = latitude;
+    ride.currentLongitude = longitude;
     ride.locationUpdatedAt = new Date();
 
     await ride.save();
 
-    return res.json({
-      result: true,
-      message: "Position mise à jour.",
-      ride: enrichRideForFrontend(ride),
-    });
-  } catch (error) {
-    console.error("updateRideLocation controller error:", error);
-    return res.status(500).json({
-      result: false,
-      error: "Impossible de mettre à jour la position.",
-    });
+    res.json({ result: true, ride });
+  } catch {
+    res.status(500).json({ result: false });
   }
 };

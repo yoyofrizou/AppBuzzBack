@@ -2,8 +2,10 @@ const mongoose = require("mongoose");
 
 const bookingSchema = mongoose.Schema(
   {
-    message: String,
-
+   message: {
+      type: String,
+      default: "",
+    },
     status: {     //statut du paiement ici pas du trajet car le statut du trajet est dans ride
       type: String,
       enum: ["authorized", "captured", "cancelled"],

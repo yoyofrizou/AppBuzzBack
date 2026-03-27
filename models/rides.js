@@ -95,7 +95,7 @@ const rideSchema = mongoose.Schema(
       index: true,
     },
 
-    // si tu as encore une ancienne logique driver séparée
+    // ne sert plus vraiment la car driver = user
     driver: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "drivers",
