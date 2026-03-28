@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Rate = require("../models/rates");
 const User = require("../models/users");
 const Ride = require("../models/rides");
@@ -309,6 +310,13 @@ exports.getDriverPublicProfile = async (req, res) => {
       });
     }
 
+       if (!mongoose.Types.ObjectId.isValid(driverId)) {
+  return res.status(400).json({
+    result: false,
+    error: "driverId invalide.",
+  });
+}
+
     const driver = await User.findById(driverId).select(
       "firstname lastname prenom nom username profilePhoto car driverAverageRating driverRatingsCount"
     );
@@ -332,16 +340,6 @@ exports.getDriverPublicProfile = async (req, res) => {
     const distribution = buildDistribution(rates);
 
 const upcomingRides = await Ride.find({
-  user: driver._id,
-})
-  .sort({ departureDateTime: 1 })
-  .select(
-    "departureAddress destinationAddress departureDateTime price placesLeft status departureLatitude departureLongitude destinationLatitude destinationLongitude"
-  );
-
-console.log("Tous les trajets du conducteur :", upcomingRides);
-
-    /*const upcomingRides = await Ride.find({
       user: driver._id,
       departureDateTime: { $gte: new Date() },
       placesLeft: { $gt: 0 },
@@ -350,7 +348,7 @@ console.log("Tous les trajets du conducteur :", upcomingRides);
       .sort({ departureDateTime: 1 })
       .select(
         "departureAddress destinationAddress departureDateTime price placesLeft departureLatitude departureLongitude destinationLatitude destinationLongitude"
-      ); */
+      ); 
 
     return res.json({
       result: true,
@@ -363,6 +361,65 @@ console.log("Tous les trajets du conducteur :", upcomingRides);
     });
   } catch (error) {
     console.error("getDriverPublicProfile error:", error);
+    return res.status(500).json({
+      result: false,
+      error: error.message || "Erreur serveur.",
+    });
+  }
+};
+
+// PROFIL PUBLIC D'UN PASSAGER
+//
+exports.getPassengerPublicProfile = async (req, res) => {
+  try {
+    const { passengerId } = req.params;
+
+    if (!passengerId) {
+      return res.json({
+        result: false,
+        error: "passengerId manquant.",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(passengerId)) {
+      return res.status(400).json({
+        result: false,
+        error: "passengerId invalide.",
+      });
+    }
+
+    const passenger = await User.findById(passengerId).select(
+      "firstname lastname prenom nom username profilePhoto passengerAverageRating passengerRatingsCount"
+    );
+
+    if (!passenger) {
+      return res.json({
+        result: false,
+        error: "Passager introuvable.",
+      });
+    }
+
+    const rates = await Rate.find({
+      reviewedUser: passenger._id,
+      reviewedRole: "passenger",
+    })
+      .populate("reviewer", "firstname lastname prenom nom profilePhoto")
+      .sort({ createdAt: -1 });
+
+    const total = rates.length;
+    const average = computeAverage(rates);
+    const distribution = buildDistribution(rates);
+
+    return res.json({
+      result: true,
+      passenger,
+      average: Number(average.toFixed(1)),
+      total,
+      distribution,
+      rates,
+    });
+  } catch (error) {
+    console.error("getPassengerPublicProfile error:", error);
     return res.status(500).json({
       result: false,
       error: error.message || "Erreur serveur.",

@@ -33,4 +33,11 @@ router.get(
   ratesController.getDriverPublicProfile
 );
 
+// PROFIL PUBLIC D'UN PASSAGER
+//
+router.get(
+  "/passenger-public-profile/:passengerId",
+  ratesController.getPassengerPublicProfile
+);
+
 module.exports = router;
