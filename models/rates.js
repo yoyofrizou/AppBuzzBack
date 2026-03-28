@@ -4,6 +4,8 @@ const rateSchema = mongoose.Schema({
   rating: {
     type: Number,
     required: true,
+     min: 1,
+     max: 5,
   },
   comment: {
     type: String,
@@ -39,5 +41,20 @@ const rateSchema = mongoose.Schema({
     default: Date.now,
   },
 });
+
+// empêche doublons
+rateSchema.index(
+  {
+    ride: 1,
+    reviewer: 1,
+    reviewedUser: 1,
+    reviewerRole: 1,
+    reviewedRole: 1,
+  },
+  { unique: true }
+);
+
+// perf
+rateSchema.index({ reviewedUser: 1, reviewedRole: 1 });
 
 module.exports = mongoose.model("rates", rateSchema);
