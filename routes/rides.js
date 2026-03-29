@@ -58,10 +58,24 @@ router.post("/create", ridesController.createRide);
 //
 router.get("/available", async (req, res) => {
   try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+
+    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      return res.json({
+        result: true,
+        rides: [],
+      });
+    }
+
     const now = new Date();
+    const in15Minutes = new Date(now.getTime() + 15 * 60 * 1000);
 
     const rides = await Ride.find({
-      departureDateTime: { $gte: now },
+      departureDateTime: {
+        $gte: now,
+        $lte: in15Minutes,
+      },
       placesLeft: { $gt: 0 },
       status: { $in: ["published", "open"] },
     })
@@ -71,9 +85,23 @@ router.get("/available", async (req, res) => {
       )
       .sort({ departureDateTime: 1 });
 
+    const nearbyRides = rides.filter((ride) => {
+      const rideLat = Number(ride.departureLatitude);
+      const rideLng = Number(ride.departureLongitude);
+
+      if (Number.isNaN(rideLat) || Number.isNaN(rideLng)) {
+        return false;
+      }
+
+      const distanceMeters = getDistanceMeters(lat, lng, rideLat, rideLng);
+
+      // ex: 1 km autour du passager
+      return distanceMeters <= 1000;
+    });
+
     return res.json({
       result: true,
-      rides,
+      rides: nearbyRides,
     });
   } catch (error) {
     console.error("GET /rides/available error:", error);
