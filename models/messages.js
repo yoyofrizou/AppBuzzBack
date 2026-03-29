@@ -33,6 +33,15 @@ const messageSchema = mongoose.Schema(
       default: "both",
       index: true,
     },
+    readByDriver: {
+  type: Boolean,
+  default: false,
+},
+
+readByPassenger: {
+  type: Boolean,
+  default: false,
+},
   },
   { timestamps: true }
 );
