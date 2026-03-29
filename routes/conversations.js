@@ -23,8 +23,8 @@ router.get("/:token", async (req, res) => {
     const conversations = await Conversation.find({
       $or: [{ driver: user._id }, { passenger: user._id }],
     })
-      .populate("driver", "prenom nom firstname lastname profilePhoto")
-      .populate("passenger", "prenom nom firstname lastname profilePhoto")
+      .populate("driver", "prenom nom profilePhoto")
+      .populate("passenger", "prenom nom profilePhoto")
       .sort({ lastMessageAt: -1 });
 
     res.json({ result: true, conversations });
@@ -48,7 +48,7 @@ router.post("/open-or-create", async (req, res) => {
 
     const ride = await Ride.findById(rideId).populate(
       "user",
-      "prenom nom firstname lastname profilePhoto"
+      "prenom nom profilePhoto"
     );
 
     if (!ride) {
@@ -88,10 +88,10 @@ router.post("/open-or-create", async (req, res) => {
 
     if (!conversation) {
       const driverFullName =
-  `${driver.prenom || driver.firstname || ""} ${driver.nom || driver.lastname || ""}`.trim();
+        `${driver.prenom || ""} ${driver.nom || ""}`.trim();
 
       const passengerFullName =
-  `${passenger.prenom || passenger.firstname || ""} ${passenger.nom || passenger.lastname || ""}`.trim();
+        `${passenger.prenom || ""} ${passenger.nom || ""}`.trim();
 
       conversation = await Conversation.create({
         ride: ride._id,
@@ -104,6 +104,10 @@ router.post("/open-or-create", async (req, res) => {
         lastMessageAt: new Date(),
       });
     }
+
+    conversation = await Conversation.findById(conversation._id)
+      .populate("driver", "prenom nom profilePhoto")
+      .populate("passenger", "prenom nom profilePhoto");
 
     res.json({
       result: true,
