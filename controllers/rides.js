@@ -25,7 +25,6 @@ async function captureRidePaymentsForPresentPassengers(rideId) {
     status: "authorized",
   });
 
-  // ❌ absents → annulation
   const absentBookings = bookings.filter(
     (b) => b.passengerPresenceStatus === "absent"
   );
@@ -34,8 +33,7 @@ async function captureRidePaymentsForPresentPassengers(rideId) {
     if (booking.paymentIntentId) {
       try {
         await stripe.paymentIntents.cancel(booking.paymentIntentId);
-      } catch (err) {
-      }
+      } catch (err) {}
     }
 
     booking.status = "cancelled";
@@ -43,7 +41,6 @@ async function captureRidePaymentsForPresentPassengers(rideId) {
     await booking.save();
   }
 
-  // ✅ présents
   const presentBookings = bookings.filter((b) =>
     ["scanned", "manual"].includes(b.passengerPresenceStatus)
   );
@@ -57,9 +54,7 @@ async function captureRidePaymentsForPresentPassengers(rideId) {
     totalPassengers += b.seatsBooked;
   });
 
-  const finalPricePerSeat = Math.floor(
-    ride.totalCost / (totalPassengers + 1)
-  );
+  const finalPricePerSeat = Math.floor(ride.totalCost / (totalPassengers + 1));
 
   for (const booking of presentBookings) {
     const finalAmount = finalPricePerSeat * booking.seatsBooked;
@@ -110,9 +105,7 @@ function canDriverStartRide(passengers = []) {
   if (!passengers.length) return false;
 
   return passengers.every((b) =>
-    ["scanned", "manual", "absent"].includes(
-      b.passengerPresenceStatus
-    )
+    ["scanned", "manual", "absent"].includes(b.passengerPresenceStatus)
   );
 }
 
@@ -133,6 +126,8 @@ function normalizeUser(userDoc, isDriver = false) {
 }
 
 function enrichRideForFrontend(rideDoc) {
+  if (!rideDoc) return null;
+
   const ride = rideDoc?.toObject ? rideDoc.toObject() : rideDoc;
 
   return {
@@ -149,6 +144,8 @@ function enrichRideForFrontend(rideDoc) {
 //
 
 exports.createRide = async (req, res) => {
+  console.time("create-ride");
+
   try {
     const {
       token,
@@ -175,11 +172,15 @@ exports.createRide = async (req, res) => {
       destinationLongitude === undefined ||
       !departureDateTime
     ) {
+      console.timeEnd("create-ride");
       return res.json({ result: false, error: "Champs manquants." });
     }
 
     const user = await User.findOne({ token });
-    if (!user) return res.json({ result: false, error: "User introuvable" });
+    if (!user) {
+      console.timeEnd("create-ride");
+      return res.json({ result: false, error: "User introuvable" });
+    }
 
     const seats = Math.max(Number(availableSeats) || 1, 1);
     const priceValue = Math.max(Number(price) || 0, 0);
@@ -204,14 +205,20 @@ exports.createRide = async (req, res) => {
 
     const savedRide = await newRide.save();
 
-    const populated = await Ride.findById(savedRide._id).populate("user");
+    const populated = await Ride.findById(savedRide._id).populate(
+      "user",
+      "prenom nom profilePhoto car"
+    );
+
+    console.timeEnd("create-ride");
 
     res.json({
       result: true,
       ride: enrichRideForFrontend(populated),
     });
   } catch (error) {
-    console.error(error);
+    console.error("CREATE RIDE ERROR =", error);
+    console.timeEnd("create-ride");
     res.status(500).json({ result: false, error: error.message });
   }
 };
@@ -223,13 +230,19 @@ exports.createRide = async (req, res) => {
 //
 
 exports.getDriverTrips = async (req, res) => {
+  console.time("driver-trips");
+
   try {
-    const user = await User.findOne({ token: req.params.token });
-    if (!user) return res.json({ result: false });
+    const user = await User.findOne({ token: req.params.token }).select("_id");
+    if (!user) {
+      console.timeEnd("driver-trips");
+      return res.json({ result: false });
+    }
 
     const rides = await Ride.find({ user: user._id })
-      .populate("user")
-      .sort({ departureDateTime: -1 });
+      .populate("user", "prenom nom profilePhoto car")
+      .sort({ departureDateTime: -1 })
+      .lean();
 
     const enriched = [];
 
@@ -237,10 +250,12 @@ exports.getDriverTrips = async (req, res) => {
       const bookings = await Booking.find({
         ride: rideDoc._id,
         status: { $in: ["authorized", "captured"] },
-      }).populate("user");
+      })
+        .populate("user", "prenom nom profilePhoto")
+        .lean();
 
       const passengers = bookings.map((b) => ({
-        ...b.toObject(),
+        ...b,
         passenger: normalizeUser(b.user),
       }));
 
@@ -253,8 +268,11 @@ exports.getDriverTrips = async (req, res) => {
       });
     }
 
+    console.timeEnd("driver-trips");
     res.json({ result: true, rides: enriched });
   } catch (error) {
+    console.error("GET DRIVER TRIPS ERROR =", error);
+    console.timeEnd("driver-trips");
     res.status(500).json({ result: false, error: "Erreur serveur" });
   }
 };
@@ -266,10 +284,13 @@ exports.getDriverTrips = async (req, res) => {
 //
 
 exports.getPassengerBookings = async (req, res) => {
+  console.time("passenger-bookings");
+
   try {
     const user = await User.findOne({ token: req.params.token }).select("_id");
 
     if (!user) {
+      console.timeEnd("passenger-bookings");
       return res.json({ result: false, error: "Utilisateur introuvable" });
     }
 
@@ -279,6 +300,8 @@ exports.getPassengerBookings = async (req, res) => {
     })
       .populate({
         path: "ride",
+        select:
+          "departureAddress destinationAddress departureDateTime status user placesLeft price",
         populate: {
           path: "user",
           select: "prenom nom profilePhoto car",
@@ -289,11 +312,21 @@ exports.getPassengerBookings = async (req, res) => {
     const result = bookings
       .filter((b) => b.ride)
       .map((b) => {
-        const ride = enrichRideForFrontend(b.ride);
+        const ride = b.ride;
 
         return {
           ...b,
-          ride,
+          ride: {
+            ...ride,
+            driver: {
+              _id: ride.user?._id || null,
+              prenom: ride.user?.prenom || "",
+              nom: ride.user?.nom || "",
+              profilePhoto: ride.user?.profilePhoto || null,
+              car: ride.user?.car || null,
+            },
+            tripCategory: getTripCategoryFromRide(ride),
+          },
           tripCategory: getPassengerTripCategory({
             ...b,
             ride,
@@ -301,8 +334,13 @@ exports.getPassengerBookings = async (req, res) => {
         };
       });
 
+    console.log("PASSENGER BOOKINGS COUNT =", result.length);
+    console.timeEnd("passenger-bookings");
+
     return res.json({ result: true, bookings: result });
   } catch (error) {
+    console.error("GET PASSENGER BOOKINGS ERROR =", error);
+    console.timeEnd("passenger-bookings");
     return res.status(500).json({
       result: false,
       error: error.message,
@@ -365,10 +403,15 @@ exports.markPassengerAbsent = async (req, res) => {
 //
 
 exports.startRide = async (req, res) => {
+  console.time("start-ride");
+
   try {
     const ride = await Ride.findById(req.params.id);
 
-    if (!ride) return res.json({ result: false });
+    if (!ride) {
+      console.timeEnd("start-ride");
+      return res.json({ result: false });
+    }
 
     const bookings = await Booking.find({
       ride: ride._id,
@@ -378,23 +421,25 @@ exports.startRide = async (req, res) => {
     const ready =
       bookings.length > 0 &&
       bookings.every((b) =>
-        ["scanned", "manual", "absent"].includes(
-          b.passengerPresenceStatus
-        )
+        ["scanned", "manual", "absent"].includes(b.passengerPresenceStatus)
       );
 
     if (!ready) {
+      console.timeEnd("start-ride");
       return res.json({
         result: false,
         error: "Tous les passagers doivent être validés",
       });
     }
 
-    const paymentSummary =
-      await captureRidePaymentsForPresentPassengers(ride._id);
+    const paymentSummary = await captureRidePaymentsForPresentPassengers(
+      ride._id
+    );
 
     ride.status = "started";
     await ride.save();
+
+    console.timeEnd("start-ride");
 
     res.json({
       result: true,
@@ -402,6 +447,8 @@ exports.startRide = async (req, res) => {
       paymentSummary,
     });
   } catch (e) {
+    console.error("START RIDE ERROR =", e);
+    console.timeEnd("start-ride");
     res.status(500).json({ result: false, error: e.message });
   }
 };
@@ -413,11 +460,18 @@ exports.startRide = async (req, res) => {
 //
 
 exports.updateRideLocation = async (req, res) => {
+  console.time("update-ride-location");
+
   try {
     const { id } = req.params;
     const { token, latitude, longitude } = req.body;
 
-    const user = await User.findOne({ token });
+    const user = await User.findOne({ token }).select("_id");
+
+    if (!user) {
+      console.timeEnd("update-ride-location");
+      return res.status(404).json({ result: false, error: "Utilisateur introuvable" });
+    }
 
     const ride = await Ride.findOne({
       _id: id,
@@ -425,6 +479,7 @@ exports.updateRideLocation = async (req, res) => {
     });
 
     if (!ride || ride.status !== "started") {
+      console.timeEnd("update-ride-location");
       return res.status(400).json({ result: false });
     }
 
@@ -434,8 +489,11 @@ exports.updateRideLocation = async (req, res) => {
 
     await ride.save();
 
+    console.timeEnd("update-ride-location");
     res.json({ result: true, ride });
-  } catch {
-    res.status(500).json({ result: false });
+  } catch (error) {
+    console.error("UPDATE RIDE LOCATION ERROR =", error);
+    console.timeEnd("update-ride-location");
+    res.status(500).json({ result: false, error: error.message });
   }
 };
