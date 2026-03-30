@@ -28,12 +28,6 @@ mongoose
   .then(() => { console.log("Database connected"); })
   .catch((error) => console.error("MongoDB connection error:", error));
 
-/*mongoose
-  .connect(process.env.CONNECTION_STRING)
-  .then(() => { console.log("Database connected");
-  })
-  .catch((error) => console.error("MongoDB connection error:", error));*/
-
 app.use(cors());
 app.use(logger("dev"));
 

@@ -13,83 +13,72 @@ router.get("/", async (req, res) => {
 });
 
 router.get("/unread-count/:token", async (req, res) => {
+  console.time("messages-unread-count");
+
   try {
-    const user = await User.findOne({ token: req.params.token });
+    const user = await User.findOne({ token: req.params.token }).select("_id");
 
     if (!user) {
+      console.timeEnd("messages-unread-count");
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
     const conversations = await Conversation.find({
       $or: [{ driver: user._id }, { passenger: user._id }],
-    });
-
-    const conversationIds = conversations.map((conv) => conv._id);
-
-    const messages = await Message.find({
-      conversation: { $in: conversationIds },
-      sender: { $ne: user._id },
-    });
-
-    console.log(
-  "UNREAD DEBUG",
-  messages.map((message) => ({
-    id: message._id,
-    content: message.content,
-    visibleTo: message.visibleTo,
-    readByDriver: message.readByDriver,
-    readByPassenger: message.readByPassenger,
-  }))
-);
+    }).select("_id driver passenger");
 
     let unreadCount = 0;
 
-    messages.forEach((message) => {
-      const conversation = conversations.find(
-        (conv) => String(conv._id) === String(message.conversation)
-      );
-
-      if (!conversation) return;
-
+    for (const conversation of conversations) {
       const isDriver = String(conversation.driver) === String(user._id);
       const isPassenger = String(conversation.passenger) === String(user._id);
 
-      const isVisibleToUser =
-        message.visibleTo === "both" ||
-        (message.visibleTo === "driver_only" && isDriver) ||
-        (message.visibleTo === "passenger_only" && isPassenger);
+      const unreadMessage = await Message.findOne({
+        conversation: conversation._id,
+        sender: { $ne: user._id },
+        ...(isDriver ? { readByDriver: false } : {}),
+        ...(isPassenger ? { readByPassenger: false } : {}),
+        $or: [
+          { visibleTo: "both" },
+          ...(isDriver ? [{ visibleTo: "driver_only" }] : []),
+          ...(isPassenger ? [{ visibleTo: "passenger_only" }] : []),
+        ],
+      }).select("_id");
 
-      if (!isVisibleToUser) return;
-
-      if (isDriver && !message.readByDriver) {
+      if (unreadMessage) {
         unreadCount += 1;
       }
+    }
 
-      if (isPassenger && !message.readByPassenger) {
-        unreadCount += 1;
-      }
-    });
+    console.log("UNREAD COUNT =", unreadCount);
+    console.timeEnd("messages-unread-count");
 
     return res.json({
       result: true,
       unreadCount,
     });
   } catch (error) {
+    console.error("GET /messages/unread-count ERROR =", error);
+    console.timeEnd("messages-unread-count");
     return res.json({ result: false, error: error.message });
   }
 });
 
 router.get("/:conversationId/:token", async (req, res) => {
+  console.time("messages-get-conversation");
+
   try {
     const user = await User.findOne({ token: req.params.token });
 
     if (!user) {
+      console.timeEnd("messages-get-conversation");
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
     const conversation = await Conversation.findById(req.params.conversationId);
 
     if (!conversation) {
+      console.timeEnd("messages-get-conversation");
       return res.json({ result: false, error: "Conversation introuvable" });
     }
 
@@ -146,27 +135,37 @@ router.get("/:conversationId/:token", async (req, res) => {
       return false;
     });
 
+    console.log("MESSAGES COUNT =", filteredMessages.length);
+    console.timeEnd("messages-get-conversation");
+
     return res.json({ result: true, messages: filteredMessages });
   } catch (error) {
+    console.error("GET /messages/:conversationId/:token ERROR =", error);
+    console.timeEnd("messages-get-conversation");
     return res.json({ result: false, error: error.message });
   }
 });
 
 router.post("/add", async (req, res) => {
+  console.time("messages-add");
+
   try {
     const { token, conversationId, content } = req.body;
 
     if (!token || !conversationId || !content || !content.trim()) {
+      console.timeEnd("messages-add");
       return res.json({ result: false, error: "Champs manquants" });
     }
 
     const user = await User.findOne({ token });
     if (!user) {
+      console.timeEnd("messages-add");
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
     const conversation = await Conversation.findById(conversationId);
     if (!conversation) {
+      console.timeEnd("messages-add");
       return res.json({ result: false, error: "Conversation introuvable" });
     }
 
@@ -188,8 +187,12 @@ router.post("/add", async (req, res) => {
     conversation.lastMessageAt = new Date();
     await conversation.save();
 
+    console.timeEnd("messages-add");
+
     return res.json({ result: true, message: newMessage });
   } catch (error) {
+    console.error("POST /messages/add ERROR =", error);
+    console.timeEnd("messages-add");
     return res.json({ result: false, error: error.message });
   }
 });

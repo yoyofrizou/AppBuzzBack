@@ -222,18 +222,6 @@ router.get("/search", async (req, res) => {
           departureDistanceMeters + destinationDistanceMeters <=
           pickupRadiusMeters + dropoffRadiusMeters + 500;
 
-        console.log("SEARCH DEBUG", {
-          rideId: ride._id,
-          departureAddress: ride.departureAddress,
-          destinationAddress: ride.destinationAddress,
-          departureDistanceMeters: Math.round(departureDistanceMeters),
-          destinationDistanceMeters: Math.round(destinationDistanceMeters),
-          pickupRadiusMeters,
-          dropoffRadiusMeters,
-          matchesDeparture,
-          matchesDestination,
-          closeEnoughOverall,
-        });
 
         if ((!matchesDeparture || !matchesDestination) && !closeEnoughOverall) {
           return null;

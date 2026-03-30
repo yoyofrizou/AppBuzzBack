@@ -72,8 +72,6 @@ router.post("/register", async (req, res) => {
   const photoPath = `/tmp/${uniqid()}.jpg`;
 
   try {
-    console.log("REGISTER BODY =", req.body);
-    console.log("REGISTER FILES =", req.files);
 
     if (
       !checkBody(req.body, [
@@ -111,16 +109,16 @@ router.post("/register", async (req, res) => {
     }
 
     const hash = bcrypt.hashSync(req.body.password, 10);
-    console.log("Hash OK");
+    
 
     await req.files.profilePhoto.mv(photoPath);
-    console.log("Photo déplacée :", photoPath);
+
 
     const resultCloudinary = await cloudinary.uploader.upload(photoPath);
-    console.log("Cloudinary OK :", resultCloudinary.secure_url);
+   
 
     fs.unlinkSync(photoPath);
-    console.log("Tmp supprimé");
+   
 
     const newUser = new User({
       prenom: req.body.prenom.trim(),
@@ -144,7 +142,7 @@ router.post("/register", async (req, res) => {
        });
 
     const savedUser = await newUser.save();
-    console.log("User saved :", savedUser._id);
+   
 
     return res.json({
       result: true,

@@ -35,7 +35,6 @@ async function captureRidePaymentsForPresentPassengers(rideId) {
       try {
         await stripe.paymentIntents.cancel(booking.paymentIntentId);
       } catch (err) {
-        console.log("Erreur cancel:", err.message);
       }
     }
 
@@ -304,7 +303,6 @@ exports.getPassengerBookings = async (req, res) => {
 
     return res.json({ result: true, bookings: result });
   } catch (error) {
-    console.error("GET /rides/passenger-bookings ERROR =", error);
     return res.status(500).json({
       result: false,
       error: error.message,
