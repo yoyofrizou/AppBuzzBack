@@ -32,36 +32,52 @@ router.get("/:token", async (req, res) => {
       .sort({ lastMessageAt: -1 })
       .lean();
 
-    const enrichedConversations = await Promise.all(
-      conversations.map(async (conversation) => {
-        const isDriver = String(conversation.driver?._id) === String(user._id);
-        const isPassenger =
-          String(conversation.passenger?._id) === String(user._id);
+    const enrichedConversations = [];
 
-        const unreadQuery = {
-          conversation: conversation._id,
-          sender: { $ne: user._id },
-          $or: [
-            { visibleTo: "both" },
-            ...(isDriver ? [{ visibleTo: "driver_only" }] : []),
-            ...(isPassenger ? [{ visibleTo: "passenger_only" }] : []),
-          ],
-          ...(isDriver ? { readByDriver: false } : {}),
-          ...(isPassenger ? { readByPassenger: false } : {}),
-        };
+    for (const conversation of conversations) {
+      const driverId =
+        conversation.driver && conversation.driver._id
+          ? String(conversation.driver._id)
+          : String(conversation.driver);
 
-        const unreadCount = await Message.countDocuments(unreadQuery);
+      const passengerId =
+        conversation.passenger && conversation.passenger._id
+          ? String(conversation.passenger._id)
+          : String(conversation.passenger);
 
-        return {
-          ...conversation,
-          unreadCount,
-        };
-      })
-    );
+      const isDriver = driverId === String(user._id);
+      const isPassenger = passengerId === String(user._id);
+
+      const unreadQuery = {
+        conversation: conversation._id,
+        sender: { $ne: user._id },
+        $or: [{ visibleTo: "both" }],
+      };
+
+      if (isDriver) {
+        unreadQuery.$or.push({ visibleTo: "driver_only" });
+        unreadQuery.readByDriver = false;
+      }
+
+      if (isPassenger) {
+        unreadQuery.$or.push({ visibleTo: "passenger_only" });
+        unreadQuery.readByPassenger = false;
+      }
+
+      const unreadCount = await Message.countDocuments(unreadQuery);
+
+      enrichedConversations.push({
+        ...conversation,
+        unreadCount,
+      });
+    }
 
     console.log(
-      "CONVERSATIONS WITH UNREAD =",
-      JSON.stringify(enrichedConversations, null, 2)
+      "UNREAD COUNTS =",
+      enrichedConversations.map((conv) => ({
+        id: conv._id,
+        unreadCount: conv.unreadCount,
+      }))
     );
 
     console.timeEnd("conversations-list");
@@ -73,7 +89,10 @@ router.get("/:token", async (req, res) => {
   } catch (error) {
     console.error("GET /conversations/:token ERROR =", error);
     console.timeEnd("conversations-list");
-    return res.json({ result: false, error: error.message });
+    return res.status(500).json({
+      result: false,
+      error: error.message,
+    });
   }
 });
 
@@ -131,11 +150,8 @@ router.post("/open-or-create", async (req, res) => {
     });
 
     if (!conversation) {
-      const driverFullName =
-        `${driver.prenom || ""} ${driver.nom || ""}`.trim();
-
-      const passengerFullName =
-        `${passenger.prenom || ""} ${passenger.nom || ""}`.trim();
+      const driverFullName = `${driver.prenom || ""} ${driver.nom || ""}`.trim();
+      const passengerFullName = `${passenger.prenom || ""} ${passenger.nom || ""}`.trim();
 
       conversation = await Conversation.create({
         ride: ride._id,
