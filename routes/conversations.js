@@ -4,6 +4,7 @@ const router = express.Router();
 const Conversation = require("../models/conversations");
 const User = require("../models/users");
 const Ride = require("../models/rides");
+const Message = require("../models/messages");
 
 router.get("/", async (req, res) => {
   res.json({
@@ -13,10 +14,13 @@ router.get("/", async (req, res) => {
 });
 
 router.get("/:token", async (req, res) => {
+  console.time("conversations-list");
+
   try {
-    const user = await User.findOne({ token: req.params.token });
+    const user = await User.findOne({ token: req.params.token }).select("_id");
 
     if (!user) {
+      console.timeEnd("conversations-list");
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
@@ -25,11 +29,51 @@ router.get("/:token", async (req, res) => {
     })
       .populate("driver", "prenom nom profilePhoto")
       .populate("passenger", "prenom nom profilePhoto")
-      .sort({ lastMessageAt: -1 });
+      .sort({ lastMessageAt: -1 })
+      .lean();
 
-    res.json({ result: true, conversations });
+    const enrichedConversations = await Promise.all(
+      conversations.map(async (conversation) => {
+        const isDriver = String(conversation.driver?._id) === String(user._id);
+        const isPassenger =
+          String(conversation.passenger?._id) === String(user._id);
+
+        const unreadQuery = {
+          conversation: conversation._id,
+          sender: { $ne: user._id },
+          $or: [
+            { visibleTo: "both" },
+            ...(isDriver ? [{ visibleTo: "driver_only" }] : []),
+            ...(isPassenger ? [{ visibleTo: "passenger_only" }] : []),
+          ],
+          ...(isDriver ? { readByDriver: false } : {}),
+          ...(isPassenger ? { readByPassenger: false } : {}),
+        };
+
+        const unreadCount = await Message.countDocuments(unreadQuery);
+
+        return {
+          ...conversation,
+          unreadCount,
+        };
+      })
+    );
+
+    console.log(
+      "CONVERSATIONS WITH UNREAD =",
+      JSON.stringify(enrichedConversations, null, 2)
+    );
+
+    console.timeEnd("conversations-list");
+
+    return res.json({
+      result: true,
+      conversations: enrichedConversations,
+    });
   } catch (error) {
-    res.json({ result: false, error: error.message });
+    console.error("GET /conversations/:token ERROR =", error);
+    console.timeEnd("conversations-list");
+    return res.json({ result: false, error: error.message });
   }
 });
 
@@ -109,12 +153,12 @@ router.post("/open-or-create", async (req, res) => {
       .populate("driver", "prenom nom profilePhoto")
       .populate("passenger", "prenom nom profilePhoto");
 
-    res.json({
+    return res.json({
       result: true,
       conversation,
     });
   } catch (error) {
-    res.json({ result: false, error: error.message });
+    return res.json({ result: false, error: error.message });
   }
 });
 

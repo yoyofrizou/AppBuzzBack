@@ -91,6 +91,7 @@ router.get("/:conversationId/:token", async (req, res) => {
           conversation: conversation._id,
           sender: { $ne: user._id },
           readByDriver: false,
+          $or: [{ visibleTo: "both" }, { visibleTo: "driver_only" }],
         },
         {
           $set: { readByDriver: true },
@@ -104,12 +105,26 @@ router.get("/:conversationId/:token", async (req, res) => {
           conversation: conversation._id,
           sender: { $ne: user._id },
           readByPassenger: false,
+          $or: [{ visibleTo: "both" }, { visibleTo: "passenger_only" }],
         },
         {
           $set: { readByPassenger: true },
         }
       );
     }
+if (isPassenger) {
+  await Message.updateMany(
+    {
+      conversation: conversation._id,
+      sender: { $ne: user._id },
+      readByPassenger: false,
+      $or: [{ visibleTo: "both" }, { visibleTo: "passenger_only" }],
+    },
+    {
+      $set: { readByPassenger: true },
+    }
+  );
+}
 
     const allMessages = await Message.find({
       conversation: conversation._id,
