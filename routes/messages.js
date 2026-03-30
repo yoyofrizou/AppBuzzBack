@@ -31,6 +31,17 @@ router.get("/unread-count/:token", async (req, res) => {
       sender: { $ne: user._id },
     });
 
+    console.log(
+  "UNREAD DEBUG",
+  messages.map((message) => ({
+    id: message._id,
+    content: message.content,
+    visibleTo: message.visibleTo,
+    readByDriver: message.readByDriver,
+    readByPassenger: message.readByPassenger,
+  }))
+);
+
     let unreadCount = 0;
 
     messages.forEach((message) => {
@@ -42,6 +53,13 @@ router.get("/unread-count/:token", async (req, res) => {
 
       const isDriver = String(conversation.driver) === String(user._id);
       const isPassenger = String(conversation.passenger) === String(user._id);
+
+      const isVisibleToUser =
+        message.visibleTo === "both" ||
+        (message.visibleTo === "driver_only" && isDriver) ||
+        (message.visibleTo === "passenger_only" && isPassenger);
+
+      if (!isVisibleToUser) return;
 
       if (isDriver && !message.readByDriver) {
         unreadCount += 1;
