@@ -268,6 +268,49 @@ exports.getDriverTrips = async (req, res) => {
 
 exports.getPassengerBookings = async (req, res) => {
   try {
+    console.log("GET /rides/passenger-bookings START", req.params.token);
+
+    const user = await User.findOne({ token: req.params.token });
+    console.log("USER FOUND =", user?._id);
+
+    if (!user) {
+      return res.json({ result: false, error: "Utilisateur introuvable" });
+    }
+
+    const bookings = await Booking.find({
+      user: user._id,
+      status: { $in: ["authorized", "captured"] },
+    }).populate({
+      path: "ride",
+      populate: { path: "user" },
+    });
+
+    console.log("BOOKINGS COUNT =", bookings.length);
+
+    const result = bookings.map((b) => {
+      const ride = enrichRideForFrontend(b.ride);
+
+      return {
+        ...b.toObject(),
+        ride,
+        tripCategory: getPassengerTripCategory({
+          ...b.toObject(),
+          ride,
+        }),
+      };
+    });
+
+    console.log("GET /rides/passenger-bookings OK");
+
+    res.json({ result: true, bookings: result });
+  } catch (error) {
+    console.error("GET /rides/passenger-bookings ERROR =", error);
+    res.status(500).json({ result: false, error: error.message });
+  }
+};
+
+/*exports.getPassengerBookings = async (req, res) => {
+  try {
     const user = await User.findOne({ token: req.params.token });
     if (!user) return res.json({ result: false });
 
@@ -296,7 +339,7 @@ exports.getPassengerBookings = async (req, res) => {
   } catch {
     res.status(500).json({ result: false });
   }
-};
+};*/
 
 //
 // ======================
