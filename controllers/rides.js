@@ -298,41 +298,52 @@ exports.getPassengerBookings = async (req, res) => {
       user: user._id,
       status: { $in: ["authorized", "captured"] },
     })
-      .populate({
-        path: "ride",
-        select:
-          "departureAddress destinationAddress departureDateTime status user placesLeft price",
-        populate: {
-          path: "user",
-          select: "prenom nom profilePhoto car",
-        },
-      })
+      .select(
+        "_id ride user seatsBooked status paymentIntentId maxAmount finalAmount passengerPresenceStatus scannedAt manualValidatedAt absentMarkedAt createdAt updatedAt message"
+      )
       .lean();
 
+    const rideIds = bookings.map((b) => b.ride).filter(Boolean);
+
+    const rides = await Ride.find({
+      _id: { $in: rideIds },
+    })
+      .select(
+        "_id departureAddress destinationAddress departureDateTime status user placesLeft price"
+      )
+      .populate("user", "prenom nom profilePhoto car")
+      .lean();
+
+    const ridesById = new Map(rides.map((ride) => [String(ride._id), ride]));
+
     const result = bookings
-      .filter((b) => b.ride)
-      .map((b) => {
-        const ride = b.ride;
+      .map((booking) => {
+        const ride = ridesById.get(String(booking.ride));
+
+        if (!ride) return null;
+
+        const enrichedRide = {
+          ...ride,
+          driver: {
+            _id: ride.user?._id || null,
+            prenom: ride.user?.prenom || "",
+            nom: ride.user?.nom || "",
+            profilePhoto: ride.user?.profilePhoto || null,
+            car: ride.user?.car || null,
+          },
+          tripCategory: getTripCategoryFromRide(ride),
+        };
 
         return {
-          ...b,
-          ride: {
-            ...ride,
-            driver: {
-              _id: ride.user?._id || null,
-              prenom: ride.user?.prenom || "",
-              nom: ride.user?.nom || "",
-              profilePhoto: ride.user?.profilePhoto || null,
-              car: ride.user?.car || null,
-            },
-            tripCategory: getTripCategoryFromRide(ride),
-          },
+          ...booking,
+          ride: enrichedRide,
           tripCategory: getPassengerTripCategory({
-            ...b,
-            ride,
+            ...booking,
+            ride: enrichedRide,
           }),
         };
-      });
+      })
+      .filter(Boolean);
 
     console.log("PASSENGER BOOKINGS COUNT =", result.length);
     console.timeEnd("passenger-bookings");
@@ -341,6 +352,7 @@ exports.getPassengerBookings = async (req, res) => {
   } catch (error) {
     console.error("GET PASSENGER BOOKINGS ERROR =", error);
     console.timeEnd("passenger-bookings");
+
     return res.status(500).json({
       result: false,
       error: error.message,
