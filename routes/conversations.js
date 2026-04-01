@@ -14,13 +14,10 @@ router.get("/", async (req, res) => {
 });
 
 router.get("/:token", async (req, res) => {
-  console.time("conversations-list");
-
   try {
     const user = await User.findOne({ token: req.params.token }).select("_id");
 
     if (!user) {
-      console.timeEnd("conversations-list");
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
@@ -32,55 +29,29 @@ router.get("/:token", async (req, res) => {
       .sort({ lastMessageAt: -1 })
       .lean();
 
-    const enrichedConversations = [];
+    const enrichedConversations = await Promise.all(
+      conversations.map(async (conversation) => {
+        const isDriver =
+          String(conversation.driver?._id || conversation.driver) ===
+          String(user._id);
 
-    for (const conversation of conversations) {
-      const driverId =
-        conversation.driver && conversation.driver._id
-          ? String(conversation.driver._id)
-          : String(conversation.driver);
+        const isPassenger =
+          String(conversation.passenger?._id || conversation.passenger) ===
+          String(user._id);
 
-      const passengerId =
-        conversation.passenger && conversation.passenger._id
-          ? String(conversation.passenger._id)
-          : String(conversation.passenger);
+        const unreadMessage = await Message.findOne({
+          conversation: conversation._id,
+          sender: { $ne: user._id },
+          ...(isDriver ? { readByDriver: false } : {}),
+          ...(isPassenger ? { readByPassenger: false } : {}),
+        }).select("_id");
 
-      const isDriver = driverId === String(user._id);
-      const isPassenger = passengerId === String(user._id);
-
-      const unreadQuery = {
-        conversation: conversation._id,
-        sender: { $ne: user._id },
-        $or: [{ visibleTo: "both" }],
-      };
-
-      if (isDriver) {
-        unreadQuery.$or.push({ visibleTo: "driver_only" });
-        unreadQuery.readByDriver = false;
-      }
-
-      if (isPassenger) {
-        unreadQuery.$or.push({ visibleTo: "passenger_only" });
-        unreadQuery.readByPassenger = false;
-      }
-
-      const unreadCount = await Message.countDocuments(unreadQuery);
-
-      enrichedConversations.push({
-        ...conversation,
-        unreadCount,
-      });
-    }
-
-    console.log(
-      "UNREAD COUNTS =",
-      enrichedConversations.map((conv) => ({
-        id: conv._id,
-        unreadCount: conv.unreadCount,
-      }))
+        return {
+          ...conversation,
+          hasUnread: !!unreadMessage,
+        };
+      })
     );
-
-    console.timeEnd("conversations-list");
 
     return res.json({
       result: true,
@@ -88,11 +59,7 @@ router.get("/:token", async (req, res) => {
     });
   } catch (error) {
     console.error("GET /conversations/:token ERROR =", error);
-    console.timeEnd("conversations-list");
-    return res.status(500).json({
-      result: false,
-      error: error.message,
-    });
+    return res.status(500).json({ result: false, error: error.message });
   }
 });
 

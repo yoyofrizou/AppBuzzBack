@@ -11,71 +11,25 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 
 //
 // ======================
-// 💰 CAPTURE PAIEMENTS
-// ======================
-//
-
-async function captureRidePaymentsForPresentPassengers(rideId) {
-  const ride = await Ride.findById(rideId);
-
-  if (!ride) throw new Error("Trajet introuvable");
-
-  const bookings = await Booking.find({
-    ride: ride._id,
-    status: "authorized",
-  });
-
-  const absentBookings = bookings.filter(
-    (b) => b.passengerPresenceStatus === "absent"
-  );
-
-  for (const booking of absentBookings) {
-    if (booking.paymentIntentId) {
-      try {
-        await stripe.paymentIntents.cancel(booking.paymentIntentId);
-      } catch (err) {}
-    }
-
-    booking.status = "cancelled";
-    booking.finalAmount = 0;
-    await booking.save();
-  }
-
-  const presentBookings = bookings.filter((b) =>
-    ["scanned", "manual"].includes(b.passengerPresenceStatus)
-  );
-
-  if (presentBookings.length === 0) {
-    return { finalPricePerSeat: 0, countedPassengers: 0 };
-  }
-
-  let totalPassengers = 0;
-  presentBookings.forEach((b) => {
-    totalPassengers += b.seatsBooked;
-  });
-
-  const finalPricePerSeat = Math.floor(ride.totalCost / (totalPassengers + 1));
-
-  for (const booking of presentBookings) {
-    const finalAmount = finalPricePerSeat * booking.seatsBooked;
-
-    await stripe.paymentIntents.capture(booking.paymentIntentId, {
-      amount_to_capture: finalAmount,
-    });
-
-    booking.status = "captured";
-    booking.finalAmount = finalAmount;
-    await booking.save();
-  }
-
-  return { finalPricePerSeat, countedPassengers: totalPassengers };
-}
-
-//
-// ======================
 // HELPERS
 // ======================
 //
+
+function formatRideDateTime(date) {
+  if (!date) return "";
+
+  const d = new Date(date);
+
+  if (Number.isNaN(d.getTime())) return "";
+
+  return d.toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function getTripCategoryFromRide(ride) {
   if (!ride) return "upcoming";
@@ -83,7 +37,7 @@ function getTripCategoryFromRide(ride) {
   if (["open", "published"].includes(ride.status)) return "upcoming";
   if (ride.status === "started") return "current";
   if (ride.status === "completed") return "past";
-  if (ride.status === "cancelled") return "cancelled";
+  if (ride.status === "cancelled") return "past";
 
   return "upcoming";
 }
@@ -92,6 +46,9 @@ function getPassengerTripCategory(booking) {
   const ride = booking?.ride;
 
   if (!ride) return "upcoming";
+
+  if (booking?.status === "cancelled") return "past";
+  if (ride.status === "cancelled") return "past";
   if (ride.status === "completed") return "past";
 
   if (["scanned", "manual"].includes(booking.passengerPresenceStatus)) {
@@ -137,6 +94,153 @@ function enrichRideForFrontend(rideDoc) {
   };
 }
 
+async function findConversationBetweenDriverAndPassenger(rideId, driverId, passengerId) {
+  return Conversation.findOne({
+    ride: rideId,
+    $or: [
+      { users: { $all: [driverId, passengerId] } },
+      { participants: { $all: [driverId, passengerId] } },
+      { driver: driverId, passenger: passengerId },
+    ],
+  });
+}
+
+async function createSystemMessageForCancellation({
+  conversation,
+  driver,
+  passenger,
+  ride,
+}) {
+  if (!conversation || !passenger?._id) return;
+
+  const driverName =
+    `${driver.prenom || driver.firstname || ""} ${driver.nom || driver.lastname || ""}`.trim();
+
+  const rideLabel = `${ride.departureAddress || "Départ"} → ${
+    ride.destinationAddress || "Arrivée"
+  }`;
+
+  const dateLabel = ride.departureDateTime
+    ? ` du ${formatRideDateTime(ride.departureDateTime)}`
+    : "";
+
+  const messageText =
+    `Le conducteur ${driverName} a annulé le trajet ${rideLabel}${dateLabel}. ` +
+    `Votre réservation a été annulée et le montant est de 0,00 €.`;
+
+  const payload = {
+    conversation: conversation._id,
+    sender: driver._id,
+    type: "system",
+  };
+
+  if ("text" in Message.schema.paths) {
+    payload.text = messageText;
+  }
+
+  if ("content" in Message.schema.paths) {
+    payload.content = messageText;
+  }
+
+  if ("visibleTo" in Message.schema.paths) {
+    payload.visibleTo = "passenger_only";
+  }
+
+  if ("readByPassenger" in Message.schema.paths) {
+    payload.readByPassenger = false;
+  }
+
+  if ("readByDriver" in Message.schema.paths) {
+    payload.readByDriver = true;
+  }
+
+  await Message.create(payload);
+
+  if ("lastMessage" in conversation) {
+    conversation.lastMessage = messageText;
+  }
+
+  if ("lastMessagePreviewPassenger" in conversation) {
+    conversation.lastMessagePreviewPassenger = messageText;
+  }
+
+  if ("lastMessageAt" in conversation) {
+    conversation.lastMessageAt = new Date();
+  }
+
+  await conversation.save();
+}
+
+//
+// ======================
+// 💰 CAPTURE PAIEMENTS
+// ======================
+//
+
+async function captureRidePaymentsForPresentPassengers(rideId) {
+  const ride = await Ride.findById(rideId);
+
+  if (!ride) {
+    throw new Error("Trajet introuvable");
+  }
+
+  const bookings = await Booking.find({
+    ride: ride._id,
+    status: "authorized",
+  });
+
+  const absentBookings = bookings.filter(
+    (b) => b.passengerPresenceStatus === "absent"
+  );
+
+  for (const booking of absentBookings) {
+    if (booking.paymentIntentId) {
+      try {
+        await stripe.paymentIntents.cancel(booking.paymentIntentId);
+      } catch (err) {
+        console.log("Erreur annulation Stripe absent =", err.message);
+      }
+    }
+
+    booking.status = "cancelled";
+    booking.finalAmount = 0;
+    booking.cancelledBy = "driver";
+    booking.cancellationReason = "passenger_absent";
+    booking.cancelledAt = new Date();
+    await booking.save();
+  }
+
+  const presentBookings = bookings.filter((b) =>
+    ["scanned", "manual"].includes(b.passengerPresenceStatus)
+  );
+
+  if (presentBookings.length === 0) {
+    return { finalPricePerSeat: 0, countedPassengers: 0 };
+  }
+
+  let totalPassengers = 0;
+
+  presentBookings.forEach((b) => {
+    totalPassengers += b.seatsBooked;
+  });
+
+  const finalPricePerSeat = Math.floor(ride.totalCost / (totalPassengers + 1));
+
+  for (const booking of presentBookings) {
+    const finalAmount = finalPricePerSeat * booking.seatsBooked;
+
+    await stripe.paymentIntents.capture(booking.paymentIntentId, {
+      amount_to_capture: finalAmount,
+    });
+
+    booking.status = "captured";
+    booking.finalAmount = finalAmount;
+    await booking.save();
+  }
+
+  return { finalPricePerSeat, countedPassengers: totalPassengers };
+}
+
 //
 // ======================
 // CREATE RIDE
@@ -177,6 +281,7 @@ exports.createRide = async (req, res) => {
     }
 
     const user = await User.findOne({ token });
+
     if (!user) {
       console.timeEnd("create-ride");
       return res.json({ result: false, error: "User introuvable" });
@@ -207,19 +312,19 @@ exports.createRide = async (req, res) => {
 
     const populated = await Ride.findById(savedRide._id).populate(
       "user",
-      "prenom nom profilePhoto car"
+      "prenom nom firstname lastname profilePhoto car"
     );
 
     console.timeEnd("create-ride");
 
-    res.json({
+    return res.json({
       result: true,
       ride: enrichRideForFrontend(populated),
     });
   } catch (error) {
     console.error("CREATE RIDE ERROR =", error);
     console.timeEnd("create-ride");
-    res.status(500).json({ result: false, error: error.message });
+    return res.status(500).json({ result: false, error: error.message });
   }
 };
 
@@ -234,13 +339,14 @@ exports.getDriverTrips = async (req, res) => {
 
   try {
     const user = await User.findOne({ token: req.params.token }).select("_id");
+
     if (!user) {
       console.timeEnd("driver-trips");
       return res.json({ result: false });
     }
 
     const rides = await Ride.find({ user: user._id })
-      .populate("user", "prenom nom profilePhoto car")
+      .populate("user", "prenom nom firstname lastname profilePhoto car")
       .sort({ departureDateTime: -1 })
       .lean();
 
@@ -249,9 +355,9 @@ exports.getDriverTrips = async (req, res) => {
     for (const rideDoc of rides) {
       const bookings = await Booking.find({
         ride: rideDoc._id,
-        status: { $in: ["authorized", "captured"] },
+        status: { $in: ["authorized", "captured", "cancelled"] },
       })
-        .populate("user", "prenom nom profilePhoto")
+        .populate("user", "prenom nom firstname lastname profilePhoto")
         .lean();
 
       const passengers = bookings.map((b) => ({
@@ -264,16 +370,18 @@ exports.getDriverTrips = async (req, res) => {
       enriched.push({
         ...ride,
         passengers,
-        canStartRide: canDriverStartRide(passengers),
+        canStartRide: canDriverStartRide(
+          passengers.filter((p) => p.status !== "cancelled")
+        ),
       });
     }
 
     console.timeEnd("driver-trips");
-    res.json({ result: true, rides: enriched });
+    return res.json({ result: true, rides: enriched });
   } catch (error) {
     console.error("GET DRIVER TRIPS ERROR =", error);
     console.timeEnd("driver-trips");
-    res.status(500).json({ result: false, error: "Erreur serveur" });
+    return res.status(500).json({ result: false, error: "Erreur serveur" });
   }
 };
 
@@ -296,10 +404,10 @@ exports.getPassengerBookings = async (req, res) => {
 
     const bookings = await Booking.find({
       user: user._id,
-      status: { $in: ["authorized", "captured"] },
+      status: { $in: ["authorized", "captured", "cancelled"] },
     })
       .select(
-        "_id ride user seatsBooked status paymentIntentId maxAmount finalAmount passengerPresenceStatus scannedAt manualValidatedAt absentMarkedAt createdAt updatedAt message"
+        "_id ride user seatsBooked status paymentIntentId maxAmount finalAmount passengerPresenceStatus scannedAt manualValidatedAt absentMarkedAt createdAt updatedAt message cancelledBy cancellationReason cancelledAt"
       )
       .lean();
 
@@ -309,9 +417,9 @@ exports.getPassengerBookings = async (req, res) => {
       _id: { $in: rideIds },
     })
       .select(
-        "_id departureAddress destinationAddress departureDateTime status user placesLeft price"
+        "_id departureAddress destinationAddress departureDateTime status user placesLeft price departureLatitude departureLongitude destinationLatitude destinationLongitude"
       )
-      .populate("user", "prenom nom profilePhoto car")
+      .populate("user", "prenom nom firstname lastname profilePhoto car")
       .lean();
 
     const ridesById = new Map(rides.map((ride) => [String(ride._id), ride]));
@@ -326,8 +434,8 @@ exports.getPassengerBookings = async (req, res) => {
           ...ride,
           driver: {
             _id: ride.user?._id || null,
-            prenom: ride.user?.prenom || "",
-            nom: ride.user?.nom || "",
+            prenom: ride.user?.prenom || ride.user?.firstname || "",
+            nom: ride.user?.nom || ride.user?.lastname || "",
             profilePhoto: ride.user?.profilePhoto || null,
             car: ride.user?.car || null,
           },
@@ -369,7 +477,9 @@ exports.getPassengerBookings = async (req, res) => {
 async function updatePresence(bookingId, status) {
   const booking = await Booking.findById(bookingId).populate("ride");
 
-  if (!booking) throw new Error("Booking introuvable");
+  if (!booking) {
+    throw new Error("Booking introuvable");
+  }
 
   booking.passengerPresenceStatus = status;
   booking.scannedAt = status === "scanned" ? new Date() : null;
@@ -384,27 +494,27 @@ async function updatePresence(bookingId, status) {
 exports.scanPassengerBooking = async (req, res) => {
   try {
     const booking = await updatePresence(req.params.bookingId, "scanned");
-    res.json({ result: true, booking });
+    return res.json({ result: true, booking });
   } catch (e) {
-    res.status(500).json({ result: false, error: e.message });
+    return res.status(500).json({ result: false, error: e.message });
   }
 };
 
 exports.validatePassengerManually = async (req, res) => {
   try {
     const booking = await updatePresence(req.params.bookingId, "manual");
-    res.json({ result: true, booking });
+    return res.json({ result: true, booking });
   } catch (e) {
-    res.status(500).json({ result: false });
+    return res.status(500).json({ result: false, error: e.message });
   }
 };
 
 exports.markPassengerAbsent = async (req, res) => {
   try {
     const booking = await updatePresence(req.params.bookingId, "absent");
-    res.json({ result: true, booking });
+    return res.json({ result: true, booking });
   } catch (e) {
-    res.status(500).json({ result: false });
+    return res.status(500).json({ result: false, error: e.message });
   }
 };
 
@@ -453,7 +563,7 @@ exports.startRide = async (req, res) => {
 
     console.timeEnd("start-ride");
 
-    res.json({
+    return res.json({
       result: true,
       ride,
       paymentSummary,
@@ -461,7 +571,130 @@ exports.startRide = async (req, res) => {
   } catch (e) {
     console.error("START RIDE ERROR =", e);
     console.timeEnd("start-ride");
-    res.status(500).json({ result: false, error: e.message });
+    return res.status(500).json({ result: false, error: e.message });
+  }
+};
+
+//
+// ======================
+// CANCEL RIDE
+// ======================
+//
+
+exports.cancelRide = async (req, res) => {
+  console.time("cancel-ride");
+
+  try {
+    const { id } = req.params;
+    const { token } = req.body;
+
+    if (!token) {
+      console.timeEnd("cancel-ride");
+      return res.status(400).json({
+        result: false,
+        error: "Token manquant.",
+      });
+    }
+
+    const driver = await User.findOne({ token });
+
+    if (!driver) {
+      console.timeEnd("cancel-ride");
+      return res.status(404).json({
+        result: false,
+        error: "Conducteur introuvable.",
+      });
+    }
+
+    const ride = await Ride.findOne({
+      _id: id,
+      user: driver._id,
+    });
+
+    if (!ride) {
+      console.timeEnd("cancel-ride");
+      return res.status(404).json({
+        result: false,
+        error: "Trajet introuvable.",
+      });
+    }
+
+    if (!["published", "open"].includes(ride.status)) {
+      console.timeEnd("cancel-ride");
+      return res.status(400).json({
+        result: false,
+        error: "Seul un trajet à venir peut être annulé.",
+      });
+    }
+
+    const bookings = await Booking.find({
+      ride: ride._id,
+      status: { $in: ["authorized", "captured"] },
+    }).populate("user", "prenom nom firstname lastname profilePhoto");
+
+    for (const booking of bookings) {
+      if (booking.paymentIntentId) {
+        try {
+          if (booking.status === "authorized") {
+            await stripe.paymentIntents.cancel(booking.paymentIntentId);
+          } else if (booking.status === "captured") {
+            await stripe.refunds.create({
+              payment_intent: booking.paymentIntentId,
+            });
+          }
+        } catch (stripeError) {
+          console.log(
+            "Erreur Stripe annulation trajet conducteur =",
+            stripeError.message
+          );
+        }
+      }
+
+      booking.status = "cancelled";
+      booking.finalAmount = 0;
+      booking.cancelledBy = "driver";
+      booking.cancellationReason = "driver_cancelled";
+      booking.cancelledAt = new Date();
+      await booking.save();
+
+      const passenger = booking.user;
+
+      if (passenger?._id) {
+        const conversation = await findConversationBetweenDriverAndPassenger(
+          ride._id,
+          driver._id,
+          passenger._id
+        );
+
+        if (conversation) {
+          await createSystemMessageForCancellation({
+            conversation,
+            driver,
+            passenger,
+            ride,
+          });
+        }
+      }
+    }
+
+    ride.status = "cancelled";
+    await ride.save();
+
+    console.timeEnd("cancel-ride");
+
+    return res.json({
+      result: true,
+      message: "Trajet annulé avec succès.",
+      ride,
+    });
+  } catch (error) {
+    console.error("CANCEL RIDE ERROR =", error);
+    console.timeEnd("cancel-ride");
+
+    return res.status(500).json({
+      result: false,
+      error: error.message || "Erreur serveur.",
+    });
   }
 };
 
@@ -482,7 +715,10 @@ exports.updateRideLocation = async (req, res) => {
 
     if (!user) {
       console.timeEnd("update-ride-location");
-      return res.status(404).json({ result: false, error: "Utilisateur introuvable" });
+      return res.status(404).json({
+        result: false,
+        error: "Utilisateur introuvable",
+      });
     }
 
     const ride = await Ride.findOne({
@@ -502,10 +738,10 @@ exports.updateRideLocation = async (req, res) => {
     await ride.save();
 
     console.timeEnd("update-ride-location");
-    res.json({ result: true, ride });
+    return res.json({ result: true, ride });
   } catch (error) {
     console.error("UPDATE RIDE LOCATION ERROR =", error);
     console.timeEnd("update-ride-location");
-    res.status(500).json({ result: false, error: error.message });
+    return res.status(500).json({ result: false, error: error.message });
   }
 };

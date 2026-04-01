@@ -296,6 +296,8 @@ router.post(
   ridesController.markPassengerAbsent
 );
 
+router.patch("/:id/cancel", ridesController.cancelRide);
+
 //
 // POST démarrer un trajet
 // bloqué tant que tous les passagers ne sont pas traités
