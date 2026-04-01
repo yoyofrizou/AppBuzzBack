@@ -323,6 +323,14 @@ router.post("/:id/complete", async (req, res) => {
       });
     }
 
+    if (ride.status === "completed") {
+      return res.json({
+        result: true,
+        message: "Trajet déjà terminé",
+        ride,
+      });
+    }
+
     if (ride.status !== "started") {
       return res.json({
         result: false,

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Stripe = require("stripe");
 const User = require("../models/users");
+const Booking = require("../models/bookings");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
@@ -28,9 +29,9 @@ router.post("/setup-intent", async (req, res) => {
       const customer = await stripe.customers.create({
         email: user.email || undefined,
         name:
-  user.prenom && user.nom
-    ? `${user.prenom} ${user.nom}`
-    : undefined,
+          user.prenom && user.nom
+            ? `${user.prenom} ${user.nom}`
+            : undefined,
         metadata: { userId: String(user._id) },
       });
 
@@ -97,7 +98,7 @@ router.post("/attach-default-payment-method", async (req, res) => {
         customer: user.stripeCustomerId,
       });
     } catch (err) {
-      if (!err.message.toLowerCase().includes("already")) {
+      if (!String(err.message || "").toLowerCase().includes("already")) {
         throw err;
       }
     }
@@ -128,7 +129,11 @@ router.get("/payment-methods/:token", async (req, res) => {
     }
 
     if (!user.stripeCustomerId) {
-      return res.json({ result: true, cards: [], defaultPaymentMethodId: null });
+      return res.json({
+        result: true,
+        cards: [],
+        defaultPaymentMethodId: null,
+      });
     }
 
     const paymentMethods = await stripe.paymentMethods.list({
@@ -245,7 +250,10 @@ router.post("/capture-payment", async (req, res) => {
       options.amount_to_capture = Number(amountToCapture);
     }
 
-    const captured = await stripe.paymentIntents.capture(paymentIntentId, options);
+    const captured = await stripe.paymentIntents.capture(
+      paymentIntentId,
+      options
+    );
 
     res.json({
       result: true,
@@ -285,23 +293,29 @@ router.get("/history/:token", async (req, res) => {
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
-    const Booking = require("../models/bookings");
-
     const bookings = await Booking.find({
       user: user._id,
       status: "captured",
     })
-      .populate("ride")
+      .populate({
+        path: "ride",
+        select: "departureAddress destinationAddress",
+      })
       .sort({ updatedAt: -1 });
 
-    const history = bookings.map((booking) => ({
-      _id: booking._id,
-      title: booking.ride
-        ? `${booking.ride.departure} → ${booking.ride.arrival}`
-        : "Trajet",
-      amount: booking.finalAmount || booking.maxAmount || 0,
-      date: booking.updatedAt,
-    }));
+    const history = bookings.map((booking) => {
+      const departure =
+        booking?.ride?.departureAddress || "Point de départ";
+      const destination =
+        booking?.ride?.destinationAddress || "Destination";
+
+      return {
+        _id: String(booking._id),
+        title: `${departure} → ${destination}`,
+        amount: booking.finalAmount || booking.maxAmount || 0,
+        date: booking.updatedAt,
+      };
+    });
 
     res.json({
       result: true,

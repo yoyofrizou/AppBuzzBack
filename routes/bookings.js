@@ -112,6 +112,13 @@ router.post("/add", async (req, res) => {
       return res.json({ result: false, error: "Trajet non trouvé" });
     }
 
+    if (String(ride.user?._id) === String(user._id)) {
+  return res.json({
+    result: false,
+    error: "Vous ne pouvez pas réserver votre propre trajet",
+  });
+}
+
     if (ride.status !== "open" && ride.status !== "published") {
   return res.json({
     result: false,
