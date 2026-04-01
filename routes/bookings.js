@@ -12,6 +12,32 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
+function formatRideDateTimeForMessage(date) {
+  if (!date) {
+    return { formattedDate: "", formattedTime: "" };
+  }
+
+  const d = new Date(date);
+
+  if (Number.isNaN(d.getTime())) {
+    return { formattedDate: "", formattedTime: "" };
+  }
+
+  return {
+    formattedDate: d.toLocaleDateString("fr-FR", {
+      timeZone: "Europe/Paris",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }),
+    formattedTime: d.toLocaleTimeString("fr-FR", {
+      timeZone: "Europe/Paris",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  };
+}
+
 //
 // GET tous les bookings (debug)
 //
@@ -155,12 +181,9 @@ router.post("/add", async (req, res) => {
       passenger: user._id,
     });
 
-    const rideDate = new Date(ride.departureDateTime);
-    const formattedDate = rideDate.toLocaleDateString("fr-FR");
-    const formattedTime = rideDate.toLocaleTimeString("fr-FR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  const { formattedDate, formattedTime } = formatRideDateTimeForMessage(
+  ride.departureDateTime
+);
 
     const departureText = ride.departureAddress || "";
     const destinationText = ride.destinationAddress || "";

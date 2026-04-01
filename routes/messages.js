@@ -50,16 +50,12 @@ router.get("/unread-count/:token", async (req, res) => {
       }
     }
 
-    console.log("UNREAD COUNT =", unreadCount);
-    console.timeEnd("messages-unread-count");
-
     return res.json({
       result: true,
       unreadCount,
     });
   } catch (error) {
-    console.error("GET /messages/unread-count ERROR =", error);
-    console.timeEnd("messages-unread-count");
+
     return res.json({ result: false, error: error.message });
   }
 });
