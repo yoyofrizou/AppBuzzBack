@@ -16,19 +16,33 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 //
 
 function formatRideDateTime(date) {
-  if (!date) return "";
+  if (!date) {
+    console.log("FORMAT RIDE DATE TIME => date manquante");
+    return "";
+  }
 
   const d = new Date(date);
 
+  console.log("FORMAT RIDE DATE TIME => input =", date);
+  console.log("FORMAT RIDE DATE TIME => parsed =", d);
+  console.log(
+    "FORMAT RIDE DATE TIME => parsed ISO =",
+    Number.isNaN(d.getTime()) ? "invalid date" : d.toISOString()
+  );
+
   if (Number.isNaN(d.getTime())) return "";
 
-  return d.toLocaleString("fr-FR", {
+  const formatted = d.toLocaleString("fr-FR", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
+
+  console.log("FORMAT RIDE DATE TIME => formatted =", formatted);
+
+  return formatted;
 }
 
 function getTripCategoryFromRide(ride) {
@@ -120,6 +134,12 @@ async function createSystemMessageForCancellation({
     ride.destinationAddress || "Arrivée"
   }`;
 
+  console.log("CANCEL MESSAGE => ride.departureDateTime brut =", ride.departureDateTime);
+  console.log(
+    "CANCEL MESSAGE => ride.departureDateTime ISO =",
+    ride.departureDateTime ? new Date(ride.departureDateTime).toISOString() : null
+  );
+
   const dateLabel = ride.departureDateTime
     ? ` du ${formatRideDateTime(ride.departureDateTime)}`
     : "";
@@ -127,6 +147,9 @@ async function createSystemMessageForCancellation({
   const messageText =
     `Le conducteur ${driverName} a annulé le trajet ${rideLabel}${dateLabel}. ` +
     `Votre réservation a été annulée et le montant est de 0,00 €.`;
+
+  console.log("CANCEL MESSAGE => dateLabel =", dateLabel);
+  console.log("CANCEL MESSAGE => final message =", messageText);
 
   const payload = {
     conversation: conversation._id,
@@ -266,6 +289,16 @@ exports.createRide = async (req, res) => {
       availableSeats,
     } = req.body;
 
+    console.log("CREATE RIDE => departureDateTime reçu =", departureDateTime);
+    console.log(
+      "CREATE RIDE => departureDateTime parsé =",
+      departureDateTime ? new Date(departureDateTime) : null
+    );
+    console.log(
+      "CREATE RIDE => departureDateTime ISO =",
+      departureDateTime ? new Date(departureDateTime).toISOString() : null
+    );
+
     if (
       !token ||
       !departureAddress ||
@@ -290,6 +323,29 @@ exports.createRide = async (req, res) => {
     const seats = Math.max(Number(availableSeats) || 1, 1);
     const priceValue = Math.max(Number(price) || 0, 0);
 
+    const parsedDepartureDate = new Date(departureDateTime);
+
+    console.log("CREATE RIDE => parsedDepartureDate =", parsedDepartureDate);
+    console.log(
+      "CREATE RIDE => parsedDepartureDate ISO =",
+      Number.isNaN(parsedDepartureDate.getTime())
+        ? "invalid date"
+        : parsedDepartureDate.toISOString()
+    );
+    console.log(
+      "CREATE RIDE => parsedDepartureDate locale FR =",
+      Number.isNaN(parsedDepartureDate.getTime())
+        ? "invalid date"
+        : parsedDepartureDate.toLocaleString("fr-FR", {
+            timeZone: "Europe/Paris",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+    );
+
     const newRide = new Ride({
       user: user._id,
       departureAddress,
@@ -298,7 +354,7 @@ exports.createRide = async (req, res) => {
       departureLongitude,
       destinationLatitude,
       destinationLongitude,
-      departureDateTime: new Date(departureDateTime),
+      departureDateTime: parsedDepartureDate,
       pickupWalkMinutes: Number(pickupWalkMinutes) || 0,
       dropoffWalkMinutes: Number(dropoffWalkMinutes) || 0,
       price: priceValue,
@@ -309,6 +365,14 @@ exports.createRide = async (req, res) => {
     });
 
     const savedRide = await newRide.save();
+
+    console.log("CREATE RIDE => savedRide.departureDateTime =", savedRide.departureDateTime);
+    console.log(
+      "CREATE RIDE => savedRide.departureDateTime ISO =",
+      savedRide.departureDateTime
+        ? new Date(savedRide.departureDateTime).toISOString()
+        : null
+    );
 
     const populated = await Ride.findById(savedRide._id).populate(
       "user",
