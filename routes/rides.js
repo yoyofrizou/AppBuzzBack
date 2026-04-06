@@ -1,20 +1,33 @@
 const express = require("express");
 const router = express.Router();
-const Stripe = require("stripe");
+const Stripe = require("stripe"); //import Stripe car certaines actions sur les trajets ont un impact sur les paiements : demarrage, annulation, capture
 
 const Ride = require("../models/rides");
 const Booking = require("../models/bookings");
-const ridesController = require("../controllers/rides");
+const ridesController = require("../controllers/rides"); //J’ai gardé la route comme point d’entrée, mais déplacé les traitements métier les plus importants dans un controller pour mieux séparer les responsabilités
+const connectDB = require("../config/connectDB");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
-function toRadians(value) {
-  return (value * Math.PI) / 180;
+router.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      result: false,
+      error: "Connexion base de données impossible.",
+    });
+  }
+});
+
+function toRadians(value) {   
+  return (value * Math.PI) / 180;   //Conversion degrés → radians
 }
 
-function getDistanceMeters(lat1, lon1, lat2, lon2) {
+function getDistanceMeters(lat1, lon1, lat2, lon2) { //calcules la distance en mètres entre deux points GPS
   const earthRadius = 6371000;
 
   const dLat = toRadians(lat2 - lat1);
@@ -32,11 +45,12 @@ function getDistanceMeters(lat1, lon1, lat2, lon2) {
   return earthRadius * c;
 }
 
-function minutesToMeters(minutes) {
-  return minutes * 150;
+function minutesToMeters(minutes) {   //convertis la marche acceptable en rayon de recherche
+  return minutes * 150; //traduis un besoin utilisateur (“je peux marcher 5 minutes”) en donnée exploitable par l’algorithme
 }
 
-router.get("/", async (req, res) => {
+
+router.get("/", async (req, res) => {  //renvoie tous les trajets
   try {
     const rides = await Ride.find();
     return res.json({ result: true, rides });
@@ -56,7 +70,7 @@ router.post("/create", ridesController.createRide);
 //
 // GET trajets disponibles
 //
-router.get("/available", async (req, res) => {
+router.get("/available", async (req, res) => {  //récupérer les trajets très proches et très proches dans le temps
   try {
     const lat = Number(req.query.lat);
     const lng = Number(req.query.lng);
@@ -71,7 +85,7 @@ router.get("/available", async (req, res) => {
     const now = new Date();
     const in15Minutes = new Date(now.getTime() + 15 * 60 * 1000);
 
-    const rides = await Ride.find({
+    const rides = await Ride.find({  //filtre trajet imminent avec encore de la place et ouvert
       departureDateTime: {
         $gte: now,
         $lte: in15Minutes,
@@ -79,13 +93,13 @@ router.get("/available", async (req, res) => {
       placesLeft: { $gt: 0 },
       status: { $in: ["published", "open"] },
     })
-      .populate(
+      .populate(  //j'enrichis le trajet avec les infos conducteur 
         "user",
         "firstname lastname prenom nom username profilePhoto car driverAverageRating driverRatingsCount"
       )
       .sort({ departureDateTime: 1 });
 
-    const nearbyRides = rides.filter((ride) => {
+    const nearbyRides = rides.filter((ride) => {   
       const rideLat = Number(ride.departureLatitude);
       const rideLng = Number(ride.departureLongitude);
 
@@ -96,7 +110,7 @@ router.get("/available", async (req, res) => {
       const distanceMeters = getDistanceMeters(lat, lng, rideLat, rideLng);
 
       // ex: 1 km autour du passager
-      return distanceMeters <= 1000;
+      return distanceMeters <= 1000;  //1km max autour
     });
 
     return res.json({
@@ -115,21 +129,21 @@ router.get("/available", async (req, res) => {
 //
 // GET recherche de trajets
 //
-router.get("/search", async (req, res) => {
+router.get("/search", async (req, res) => {   //une des routes les plus importantes
   try {
-    const departure = req.query.departure?.trim() || "";
+    const departure = req.query.departure?.trim() || "";    //recup les adresses
     const destination = req.query.destination?.trim() || "";
-    const dateTime = req.query.dateTime?.trim() || "";
+    const dateTime = req.query.dateTime?.trim() || "";  //recup la date
 
-    const departureLat = Number(req.query.departureLat);
+    const departureLat = Number(req.query.departureLat); //recup les coordonnées réelles
     const departureLng = Number(req.query.departureLng);
     const destinationLat = Number(req.query.destinationLat);
     const destinationLng = Number(req.query.destinationLng);
 
-    const pickupWalkMinutes = Number(req.query.pickupWalkMinutes) || 5;
+    const pickupWalkMinutes = Number(req.query.pickupWalkMinutes) || 5;    //valeurs par défaut si le front ne les envoie pas
     const dropoffWalkMinutes = Number(req.query.dropoffWalkMinutes) || 10;
 
-    if (!departure || !destination) {
+    if (!departure || !destination) {    //Validation minimale
       return res.json({
         result: false,
         error: "Les champs départ et destination sont obligatoires.",
@@ -137,7 +151,7 @@ router.get("/search", async (req, res) => {
     }
 
     if (
-      Number.isNaN(departureLat) ||
+      Number.isNaN(departureLat) ||    //force l’usage des coordonnées GPS, la recherche finale doit être géographique, pas seulement textuelle
       Number.isNaN(departureLng) ||
       Number.isNaN(destinationLat) ||
       Number.isNaN(destinationLng)
@@ -154,7 +168,7 @@ router.get("/search", async (req, res) => {
     const pickupRadiusMeters = minutesToMeters(pickupWalkMinutes);
     const dropoffRadiusMeters = minutesToMeters(dropoffWalkMinutes);
 
-    const filters = {
+    const filters = {    //limite aux trajets réellement réservables
       placesLeft: { $gt: 0 },
       status: { $in: ["published", "open"] },
     };
@@ -162,7 +176,7 @@ router.get("/search", async (req, res) => {
     if (dateTime) {
       const requestedDate = new Date(dateTime);
 
-      if (!Number.isNaN(requestedDate.getTime())) {
+      if (!Number.isNaN(requestedDate.getTime())) {   //fenêtre de tolérance de ±15 minutes
         const startWindow = new Date(requestedDate.getTime() - 15 * 60 * 1000);
         const endWindow = new Date(requestedDate.getTime() + 15 * 60 * 1000);
 
@@ -182,7 +196,7 @@ router.get("/search", async (req, res) => {
       )
       .sort({ departureDateTime: 1 });
 
-    const matchedRides = rides
+    const matchedRides = rides   //parcours les trajets pour calculer les distances exactes
       .map((ride) => {
         const rideDepartureLat = Number(ride.departureLatitude);
         const rideDepartureLng = Number(ride.departureLongitude);
@@ -198,7 +212,7 @@ router.get("/search", async (req, res) => {
           return null;
         }
 
-        const departureDistanceMeters = getDistanceMeters(
+        const departureDistanceMeters = getDistanceMeters(     //calcul séparé de la distance de depart et d'arrivee
           departureLat,
           departureLng,
           rideDepartureLat,
@@ -212,13 +226,13 @@ router.get("/search", async (req, res) => {
           rideDestinationLng
         );
 
-        const matchesDeparture =
+        const matchesDeparture =    //vérifies si le trajet est acceptable côté départ et côté arrivée
           departureDistanceMeters <= pickupRadiusMeters;
         const matchesDestination =
           destinationDistanceMeters <= dropoffRadiusMeters;
 
-        // Tolérance légère pour éviter l'effet "adresse exacte obligatoire".
-        const closeEnoughOverall =
+       
+        const closeEnoughOverall = //tolerance pour eviter qu’un trajet très proche soit rejeté pour quelques mètres
           departureDistanceMeters + destinationDistanceMeters <=
           pickupRadiusMeters + dropoffRadiusMeters + 500;
 
@@ -234,7 +248,7 @@ router.get("/search", async (req, res) => {
         };
       })
       .filter(Boolean)
-      .sort((a, b) => {
+      .sort((a, b) => {    //tries les résultats du plus pertinent au moins pertinent
         const aScore = a.departureDistanceMeters + a.destinationDistanceMeters;
         const bScore = b.departureDistanceMeters + b.destinationDistanceMeters;
         return aScore - bScore;
@@ -262,35 +276,30 @@ router.get("/search", async (req, res) => {
   }
 });
 
-//
+
+//2 routes ou je délègue au controller les trajets conducteur et les réservations passager
 // GET mes trajets en tant que conducteur
-//
 router.get("/driver/:token", ridesController.getDriverTrips);
 
-//
+
 // GET réservations passager
-//
 router.get("/passenger-bookings/:token", ridesController.getPassengerBookings);
 
-//
+
+//3 Routes liées à la présence du passager
 // POST scanner un passager
-//
 router.post(
   "/bookings/:bookingId/scan-passenger",
   ridesController.scanPassengerBooking
 );
 
-//
 // POST validation manuelle
-//
 router.post(
   "/bookings/:bookingId/manual-validate",
   ridesController.validatePassengerManually
 );
 
-//
 // POST marquer un passager absent
-//
 router.post(
   "/bookings/:bookingId/mark-absent",
   ridesController.markPassengerAbsent
@@ -298,32 +307,26 @@ router.post(
 
 router.patch("/:id/cancel", ridesController.cancelRide);
 
-//
 // POST démarrer un trajet
 // bloqué tant que tous les passagers ne sont pas traités
-//
 router.post("/:id/start", ridesController.startRide);
 
-//
 // PATCH mise à jour localisation conducteur pendant le trajet
-//
 router.patch("/:id/location", ridesController.updateRideLocation);
 
-//
 // POST terminer un trajet
-//
-router.post("/:id/complete", async (req, res) => {
+router.post("/:id/complete", async (req, res) => { 
   try {
-    const ride = await Ride.findById(req.params.id);
+    const ride = await Ride.findById(req.params.id);   //verif que le trajet existe
 
-    if (!ride) {
+    if (!ride) {   
       return res.json({
         result: false,
         error: "Trajet introuvable",
       });
     }
 
-    if (ride.status === "completed") {
+    if (ride.status === "completed") {  //verif qu il est pas deja termine
       return res.json({
         result: true,
         message: "Trajet déjà terminé",
@@ -331,7 +334,7 @@ router.post("/:id/complete", async (req, res) => {
       });
     }
 
-    if (ride.status !== "started") {
+    if (ride.status !== "started") {  //verif qu il a bien demarrer 
       return res.json({
         result: false,
         error: "Seul un trajet démarré peut être terminé",
@@ -339,7 +342,7 @@ router.post("/:id/complete", async (req, res) => {
     }
 
     ride.status = "completed";
-    await ride.save();
+    await ride.save();     //puis je le passe a completed
 
     return res.json({
       result: true,

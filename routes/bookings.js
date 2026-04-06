@@ -1,18 +1,32 @@
 const express = require("express");
-const router = express.Router();
-const Stripe = require("stripe");
+const router = express.Router();   //crée le router des réservations
+const Stripe = require("stripe"); //import stripe parce que l’annulation d’un booking peut déclencher une annulation de préautorisation
 
-const Booking = require("../models/bookings");
+const Booking = require("../models/bookings");  //importe tous les objets liés à la réservation
 const User = require("../models/users");
 const Ride = require("../models/rides");
 const Conversation = require("../models/conversations");
 const Message = require("../models/messages");
+const connectDB = require("../config/connectDB");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
-function formatRideDateTimeForMessage(date) {
+router.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      result: false,
+      error: "Connexion base de données impossible.",
+    });
+  }
+});
+
+
+function formatRideDateTimeForMessage(date) {   //formates la date du trajet pour l’utiliser dans les messages de conversation
   if (!date) {
     return { formattedDate: "", formattedTime: "" };
   }
@@ -41,7 +55,7 @@ function formatRideDateTimeForMessage(date) {
 //
 // GET tous les bookings (debug)
 //
-router.get("/", async (req, res) => {
+router.get("/", async (req, res) => {   //Récupére tous les bookings, debug
   try {
     const bookings = await Booking.find()
       .populate("user", "firstname lastname username email")
@@ -53,9 +67,8 @@ router.get("/", async (req, res) => {
   }
 });
 
-//
-// GET les bookings de l'utilisateur connecté via son token
-//
+
+// recupere les bookings de l'utilisateur connecté via son token
 router.get("/:token", async (req, res) => {
   try {
     const user = await User.findOne({ token: req.params.token });
@@ -75,11 +88,8 @@ router.get("/:token", async (req, res) => {
   }
 });
 
-//
-// POST créer une réservation
-// Stripe a déjà été appelé avant dans /payments/authorize-payment
-// ou /payments/authorize-payment-onetime
-//
+
+// crée une réservation
 router.post("/add", async (req, res) => {
   try {
     const {
@@ -91,7 +101,7 @@ router.post("/add", async (req, res) => {
       maxAmount,
     } = req.body;
 
-    if (!token || !rideId || !paymentIntentId || !maxAmount) {
+    if (!token || !rideId || !paymentIntentId || !maxAmount) {  //je ne veux pas créer de réservation incomplète
       return res.json({
         result: false,
         error: "Champs manquants",
@@ -113,20 +123,20 @@ router.post("/add", async (req, res) => {
     }
 
     if (String(ride.user?._id) === String(user._id)) {
-  return res.json({
-    result: false,
-    error: "Vous ne pouvez pas réserver votre propre trajet",
-  });
-}
+      return res.json({
+        result: false,
+        error: "Vous ne pouvez pas réserver votre propre trajet",
+      });
+    }
 
-    if (ride.status !== "open" && ride.status !== "published") {
-  return res.json({
-    result: false,
-    error: "Le trajet n'est plus réservable",
-  });
-}
+    if (ride.status !== "open" && ride.status !== "published") {  //Un trajet commencé, terminé ou annulé ne doit plus être réservable
+      return res.json({
+        result: false,
+        error: "Le trajet n'est plus réservable",
+      });
+    }
 
-    const parsedSeatsBooked = Number(seatsBooked) || 1;
+    const parsedSeatsBooked = Number(seatsBooked) || 1;  //protège la capacité du trajet
 
     if (parsedSeatsBooked <= 0) {
       return res.json({
@@ -142,7 +152,7 @@ router.post("/add", async (req, res) => {
       });
     }
 
-    const existingBooking = await Booking.findOne({
+    const existingBooking = await Booking.findOne({   //vérifie qu’il n’a pas déjà réservé ce trajet
       ride: ride._id,
       user: user._id,
     });
@@ -154,6 +164,29 @@ router.post("/add", async (req, res) => {
       });
     }
 
+    // empêche un passager d’avoir un autre trajet déjà en cours
+    const passengerBookings = await Booking.find({
+      user: user._id,
+      status: { $in: ["authorized", "captured"] },  //authorisez car le paiement a déjà été préautorisé avant via /payments
+    }).populate({
+      path: "ride",
+      select: "_id status departureAddress destinationAddress departureDateTime",
+    });
+
+    const currentStartedBooking = passengerBookings.find(
+      (booking) =>
+        booking?.ride &&
+        String(booking.ride._id) !== String(ride._id) &&
+        booking.ride.status === "started"
+    );
+
+    if (currentStartedBooking) {
+      return res.json({
+        result: false,
+        error: "Vous avez déjà un trajet en cours. Impossible de réserver un autre trajet pour le moment.",
+      });
+    }
+
     const newBooking = new Booking({
       message,
       status: "authorized",
@@ -161,16 +194,16 @@ router.post("/add", async (req, res) => {
       user: user._id,
       seatsBooked: parsedSeatsBooked,
       maxAmount: Number(maxAmount),
-      finalAmount: null,
+      finalAmount: null,   //montant final n’est pas encore connu à ce moment-là
       paymentIntentId,
     });
 
     const savedBooking = await newBooking.save();
 
     ride.placesLeft = ride.placesLeft - parsedSeatsBooked;
-    await ride.save();
+    await ride.save();     //la resa a un impact immédiat sur la disponibilité du trajet
 
-    const driver = ride.user;
+    const driver = ride.user;  //cherche une conversation existante ou bien je la crées
 
     if (!driver) {
       return res.json({
@@ -184,24 +217,25 @@ router.post("/add", async (req, res) => {
 
     let conversation = await Conversation.findOne({
       ride: ride._id,
-      driver: driver._id,
+      driver: driver._id,  //construis deux messages : un pour le driver et un pour le passager
       passenger: user._id,
     });
 
-  const { formattedDate, formattedTime } = formatRideDateTimeForMessage(
-  ride.departureDateTime
-);
+    const { formattedDate, formattedTime } = formatRideDateTimeForMessage(
+      ride.departureDateTime
+    );
 
     const departureText = ride.departureAddress || "";
     const destinationText = ride.destinationAddress || "";
 
     const passengerRating =
-      typeof user.averageRating === "number"
-        ? user.averageRating.toFixed(1)
+      typeof user.passengerAverageRating === "number"
+        ? user.passengerAverageRating.toFixed(1)
         : "N/A";
 
-    const driverMessage =
-      `Bonjour, ${user.firstname || "Un passager"} ⭐ ${passengerRating} vient de réserver une place sur votre trajet ${departureText} → ${destinationText}, prévu le ${formattedDate} à ${formattedTime}.`;
+   const driverMessage =
+  `Bonjour, ${user.firstname || "Un passager"} ⭐ ${passengerRating} vient de réserver une place sur votre trajet ${departureText} → ${destinationText}, prévu le ${formattedDate} à ${formattedTime}.` +
+  (message ? `\nMessage du passager : "${message}"` : "");
 
     const passengerMessage =
       `Merci d’avoir réservé votre trajet avec ${driverFullName}. Vous pouvez lui écrire via ce chat si besoin.`;
@@ -240,7 +274,7 @@ router.post("/add", async (req, res) => {
       visibleTo: "passenger_only",
     });
 
-    res.json({
+    res.json({     //Le frontend récupère le booking, la conversation a ouvrir si besoin et un message clair
       result: true,
       booking: savedBooking,
       conversationId: conversation._id,
@@ -261,12 +295,23 @@ router.post("/add", async (req, res) => {
   }
 });
 
-//
+
 // DELETE supprimer une réservation
-//
-router.delete("/delete/:bookingId", async (req, res) => {
+
+router.delete("/delete/:bookingId/:token", async (req, res) => {   //pour que le passager puisse annuler sa resa
   try {
-    const booking = await Booking.findById(req.params.bookingId);
+    const { bookingId, token } = req.params;
+
+    const user = await User.findOne({ token }); //retrouve l utilisateur
+
+    if (!user) {
+      return res.json({
+        result: false,
+        error: "Utilisateur non trouvé",
+      });
+    }
+
+    const booking = await Booking.findById(bookingId);   //retrouve la resa
 
     if (!booking) {
       return res.json({
@@ -275,31 +320,38 @@ router.delete("/delete/:bookingId", async (req, res) => {
       });
     }
 
-     if (booking.status === "captured") {
+    if (String(booking.user) !== String(user._id)) {   //verif que la resa appartient bien au user
+      return res.json({
+        result: false,
+        error: "Vous ne pouvez pas annuler cette réservation",
+      });
+    }
+
+    if (booking.status === "captured") {   // bloque si deja capturer
       return res.json({
         result: false,
         error: "Impossible d'annuler une réservation déjà capturée.",
       });
     }
 
-    // Si la préautorisation existe encore, on l'annule
-    if (booking.paymentIntentId && booking.status === "authorized") {
+    if (booking.paymentIntentId && booking.status === "authorized") {  //annule paiement si autorise
       try {
         await stripe.paymentIntents.cancel(booking.paymentIntentId);
-      } catch (err) {
-        // On évite de casser la suppression si Stripe échoue ici
-      }
+      } catch (err) {}
     }
 
-    const ride = await Ride.findById(booking.ride);
+    const ride = await Ride.findById(booking.ride);    //remettre la place libre
     if (ride) {
       ride.placesLeft = ride.placesLeft + booking.seatsBooked;
       await ride.save();
     }
 
-   booking.status = "cancelled";
-booking.finalAmount = 0;
-await booking.save();
+    booking.status = "cancelled";   //passer le trajet a cancelled
+    booking.finalAmount = 0;
+    booking.cancelledBy = "passenger";
+    booking.cancellationReason = "passenger_cancelled";
+    booking.cancelledAt = new Date();
+    await booking.save();
 
     res.json({
       result: true,

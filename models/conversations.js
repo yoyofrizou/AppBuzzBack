@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const conversationSchema = mongoose.Schema(
-  {
+  {    //tres important : il faut distinguer les discussions selon le trajet, je voulais que la messagerie soit liée au contexte métier
     ride: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "rides",
@@ -9,7 +9,7 @@ const conversationSchema = mongoose.Schema(
       index: true,
     },
 
-    driver: {
+    driver: {    //je veux savoir clairement car les deux sont users mais avec des roles non interchangeables ici
       type: mongoose.Schema.Types.ObjectId,
       ref: "users",
       required: true,
@@ -23,7 +23,7 @@ const conversationSchema = mongoose.Schema(
       index: true,
     },
 
-    driverName: {
+    driverName: {    //avoir une donnée prête à afficher, simplifier certains usages UI, évite certaines dépendances fortes au populate
       type: String,
       default: "",
     },
@@ -33,7 +33,7 @@ const conversationSchema = mongoose.Schema(
       default: "",
     },
 
-    lastMessagePreviewDriver: {
+    lastMessagePreviewDriver: {    //le conducteur peut voir un aperçu du dernier message adapté à lui, ex : “Un passager vient de réserver”
       type: String,
       default: "",
     },
@@ -43,7 +43,7 @@ const conversationSchema = mongoose.Schema(
       default: "",
     },
 
-    lastMessageAt: {
+    lastMessageAt: {  //trier les conversations par activité récente
       type: Date,
       default: Date.now,
     },
@@ -51,6 +51,6 @@ const conversationSchema = mongoose.Schema(
   { timestamps: true }
 );
 
-conversationSchema.index({ ride: 1, driver: 1, passenger: 1 }, { unique: true });
+conversationSchema.index({ ride: 1, driver: 1, passenger: 1 }, { unique: true }); //empêches qu’il y ait deux conversations pour la meme chose, je securise au niveau de la BDD
 
 module.exports = mongoose.model("conversations", conversationSchema);

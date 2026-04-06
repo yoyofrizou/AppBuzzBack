@@ -1,9 +1,10 @@
 const mongoose = require("mongoose");
 
-const rideSchema = mongoose.Schema(
+const rideSchema = mongoose.Schema( //commence le schéma d’un trajet
   {
+//un trajet ce n’est pas juste “départ / arrivée”
 
-    departureAddress: {
+    departureAddress: { //version humaine de l'adresse avec adresse lisible pour l'affichage
       type: String,
       required: true,
       trim: true,
@@ -15,7 +16,7 @@ const rideSchema = mongoose.Schema(
       trim: true,
     },
 
-    departureLatitude: {
+    departureLatitude: { //versions coordonnees exacts pour les calculs
       type: Number,
       required: true,
     },
@@ -35,14 +36,14 @@ const rideSchema = mongoose.Schema(
       required: true,
     },
 
-    departureDateTime: {
+    departureDateTime: {   //pour pouvoir trier, filtrer, comparer dans le temps et gerer les fenetres de recherche
       type: Date,
       required: true,
     },
 
-    pickupWalkMinutes: {
+    pickupWalkMinutes: {   //rend la recherche plus souple
       type: Number,
-      default: 0,
+      default: 0,    //Pour empêcher les valeurs négatives
       min: 0,
     },
 
@@ -52,7 +53,7 @@ const rideSchema = mongoose.Schema(
       min: 0,
     },
 
-    // prix affiché côté UI, en euros
+    // prix affiché côté UI, en euros, diff de totalcost
     price: {
       type: Number,
       required: true,
@@ -66,28 +67,28 @@ const rideSchema = mongoose.Schema(
       min: 1,
     },
 
-    // nombre de places restantes
+    // nombre de places restantes, pour pas recalculer a chaque fois
     placesLeft: {
       type: Number,
       required: true,
       min: 0,
     },
 
-    // coût total estimé du trajet, en centimes
+    // coût total estimé du trajet, en centimes pour faciliter le calcul
     totalCost: {
       type: Number,
       required: true,
       min: 1,
     },
 
-   status: {
+   status: {   //cycle de vie du trajet
   type: String,
   enum: ["published", "started", "completed", "cancelled", "open"],
-  default: "published",
+  default: "published",        //published et open pourrait en fait etre fusionnes
   index: true,
 },
 
-    // conducteur côté users
+    // conducteur relie a users et pas seulement a driver
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "users",
@@ -95,14 +96,14 @@ const rideSchema = mongoose.Schema(
       index: true,
     },
 
-    // ne sert plus vraiment la car driver = user
+    // ne sert plus vraiment la car driver = user mas peur d'avoir oublie un changement qq part et de faire planter l'appli
     driver: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "drivers",
       default: null,
     },
 
-    currentLatitude: {
+currentLatitude: {  //position actuelle du conducteur pendant le trajet, permet le suivi du trajet côté passager
   type: Number,
   default: null,
 },

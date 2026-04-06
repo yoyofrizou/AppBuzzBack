@@ -1,4 +1,4 @@
-const Ride = require("../models/rides");
+const Ride = require("../models/rides");    //importe tous les modèles nécessaires à la logique trajet, un trajet n’est pas isolé, il est lie a des utilisateurs, des resa, des paiements et des messages
 const User = require("../models/users");
 const Booking = require("../models/bookings");
 const Conversation = require("../models/conversations");
@@ -9,26 +9,15 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: process.env.STRIPE_API_VERSION || "2023-10-16",
 });
 
-//
-// ======================
 // HELPERS
-// ======================
-//
 
-function formatRideDateTime(date) {
+function formatRideDateTime(date) {   //les helpers sont des petites fonctions utilitaires pour ne pas repeter du code
+                              //helper pour formater les dates de manière homogène au lieu de refaire ce traitement à plusieurs endroits
   if (!date) {
-    console.log("FORMAT RIDE DATE TIME => date manquante");
     return "";
   }
 
   const d = new Date(date);
-
-  console.log("FORMAT RIDE DATE TIME => input =", date);
-  console.log("FORMAT RIDE DATE TIME => parsed =", d);
-  console.log(
-    "FORMAT RIDE DATE TIME => parsed ISO =",
-    Number.isNaN(d.getTime()) ? "invalid date" : d.toISOString()
-  );
 
   if (Number.isNaN(d.getTime())) return "";
 
@@ -39,13 +28,11 @@ function formatRideDateTime(date) {
     hour: "2-digit",
     minute: "2-digit",
   });
-
-  console.log("FORMAT RIDE DATE TIME => formatted =", formatted);
-
-  return formatted;
+ 
+  return formatted;      //cette fonction transforme une date brute en texte lisible
 }
 
-function getTripCategoryFromRide(ride) {
+function getTripCategoryFromRide(ride) {  //traduit le statut technique du trajet en une catégorie simple pour le frontend : a venir, en cours, passe
   if (!ride) return "upcoming";
 
   if (["open", "published"].includes(ride.status)) return "upcoming";
@@ -53,10 +40,10 @@ function getTripCategoryFromRide(ride) {
   if (ride.status === "completed") return "past";
   if (ride.status === "cancelled") return "past";
 
-  return "upcoming";
+  return "upcoming";       //centralise la traduction des statuts backend en catégories plus simples pour le frontend
 }
 
-function getPassengerTripCategory(booking) {
+function getPassengerTripCategory(booking) {   //pareil cote passager sauf que la categorie depend ici du statut du trajet, de la resa et de la presence ou non
   const ride = booking?.ride;
 
   if (!ride) return "upcoming";
@@ -72,19 +59,19 @@ function getPassengerTripCategory(booking) {
   return "upcoming";
 }
 
-function canDriverStartRide(passengers = []) {
+function canDriverStartRide(passengers = []) {   //dit si le conducteur peut démarrer le trajet
   if (!passengers.length) return false;
 
   return passengers.every((b) =>
-    ["scanned", "manual", "absent"].includes(b.passengerPresenceStatus)
+    ["scanned", "manual", "absent"].includes(b.passengerPresenceStatus) //que si tous les passagers ont été traités
   );
-}
+}  //Parce que le démarrage déclenche aussi la logique de paiement
 
-function normalizeUser(userDoc, isDriver = false) {
+function normalizeUser(userDoc, isDriver = false) {  //transforme un utilisateur en objet propre et cohérent pour le frontend
   if (!userDoc) return null;
 
-  return {
-    _id: userDoc._id,
+  return {      //deux logiques de nommage dans le projet : firstname/lastname et prenom/nom
+    _id: userDoc._id,     //Donc cette fonction permet de renvoyer un format stable
     firstname: userDoc.firstname || "",
     lastname: userDoc.lastname || "",
     prenom: userDoc.prenom || userDoc.firstname || "",
@@ -92,34 +79,34 @@ function normalizeUser(userDoc, isDriver = false) {
     username: userDoc.username || "",
     email: userDoc.email || "",
     profilePhoto: userDoc.profilePhoto || null,
-    ...(isDriver && { car: userDoc.car || null }),
+    ...(isDriver && { car: userDoc.car || null }),   //Si c’est un conducteur, on ajoute sa voiture
   };
 }
 
-function enrichRideForFrontend(rideDoc) {
+function enrichRideForFrontend(rideDoc) {    //enrichit un trajet avec :
   if (!rideDoc) return null;
 
   const ride = rideDoc?.toObject ? rideDoc.toObject() : rideDoc;
 
   return {
     ...ride,
-    driver: normalizeUser(ride.user, true),
-    tripCategory: getTripCategoryFromRide(ride),
+    driver: normalizeUser(ride.user, true),   //un conducteur propremment formate
+    tripCategory: getTripCategoryFromRide(ride),   //une categorie frontend
   };
 }
 
-async function findConversationBetweenDriverAndPassenger(rideId, driverId, passengerId) {
+async function findConversationBetweenDriverAndPassenger(rideId, driverId, passengerId) {   //cherches la conversation entre le conducteur et le passager pour un trajet donné
   return Conversation.findOne({
     ride: rideId,
-    $or: [
+    $or: [   //plusieurs formes dans $or car ma structure de conversation a change au fur et a mesure
       { users: { $all: [driverId, passengerId] } },
       { participants: { $all: [driverId, passengerId] } },
       { driver: driverId, passenger: passengerId },
-    ],
+    ],   //la je rends donc mon code compatible avec plusieurs structures existantes
   });
 }
 
-async function createSystemMessageForCancellation({
+async function createSystemMessageForCancellation({   //ne me contente pas de changer un statut en base, j'informe aussi le passager
   conversation,
   driver,
   passenger,
@@ -127,31 +114,23 @@ async function createSystemMessageForCancellation({
 }) {
   if (!conversation || !passenger?._id) return;
 
-  const driverName =
+  const driverName =    //construit le nom du conducteur
     `${driver.prenom || driver.firstname || ""} ${driver.nom || driver.lastname || ""}`.trim();
 
-  const rideLabel = `${ride.departureAddress || "Départ"} → ${
+  const rideLabel = `${ride.departureAddress || "Départ"} → ${   //construit le libelle du trajet
     ride.destinationAddress || "Arrivée"
   }`;
 
-  console.log("CANCEL MESSAGE => ride.departureDateTime brut =", ride.departureDateTime);
-  console.log(
-    "CANCEL MESSAGE => ride.departureDateTime ISO =",
-    ride.departureDateTime ? new Date(ride.departureDateTime).toISOString() : null
-  );
 
-  const dateLabel = ride.departureDateTime
+  const dateLabel = ride.departureDateTime    //ajoute date si dispo
     ? ` du ${formatRideDateTime(ride.departureDateTime)}`
     : "";
 
-  const messageText =
+  const messageText =   //cree un texte systeme
     `Le conducteur ${driverName} a annulé le trajet ${rideLabel}${dateLabel}. ` +
     `Votre réservation a été annulée et le montant est de 0,00 €.`;
 
-  console.log("CANCEL MESSAGE => dateLabel =", dateLabel);
-  console.log("CANCEL MESSAGE => final message =", messageText);
-
-  const payload = {
+  const payload = {     //l'enregistre comme message
     conversation: conversation._id,
     sender: driver._id,
     type: "system",
@@ -191,7 +170,7 @@ async function createSystemMessageForCancellation({
     conversation.lastMessageAt = new Date();
   }
 
-  await conversation.save();
+  await conversation.save();  //enregistre met a jour la conversation
 }
 
 //
@@ -200,32 +179,31 @@ async function createSystemMessageForCancellation({
 // ======================
 //
 
-async function captureRidePaymentsForPresentPassengers(rideId) {
-  const ride = await Ride.findById(rideId);
+async function captureRidePaymentsForPresentPassengers(rideId) { //gère la partie paiement au moment du démarrage du trajet
+  const ride = await Ride.findById(rideId);  //recup le trajet
 
   if (!ride) {
     throw new Error("Trajet introuvable");
   }
 
-  const bookings = await Booking.find({
+  const bookings = await Booking.find({   //recup les bokkings autorises 
     ride: ride._id,
     status: "authorized",
   });
 
-  const absentBookings = bookings.filter(
+  const absentBookings = bookings.filter(  //separe les absents
     (b) => b.passengerPresenceStatus === "absent"
   );
 
   for (const booking of absentBookings) {
     if (booking.paymentIntentId) {
       try {
-        await stripe.paymentIntents.cancel(booking.paymentIntentId);
+        await stripe.paymentIntents.cancel(booking.paymentIntentId);  //annule les pre autorisation stripe
       } catch (err) {
-        console.log("Erreur annulation Stripe absent =", err.message);
       }
     }
 
-    booking.status = "cancelled";
+    booking.status = "cancelled";   //marque ces bookings comme annules 
     booking.finalAmount = 0;
     booking.cancelledBy = "driver";
     booking.cancellationReason = "passenger_absent";
@@ -233,30 +211,30 @@ async function captureRidePaymentsForPresentPassengers(rideId) {
     await booking.save();
   }
 
-  const presentBookings = bookings.filter((b) =>
+  const presentBookings = bookings.filter((b) =>   //separe les presents
     ["scanned", "manual"].includes(b.passengerPresenceStatus)
   );
 
-  if (presentBookings.length === 0) {
+  if (presentBookings.length === 0) {    
     return { finalPricePerSeat: 0, countedPassengers: 0 };
   }
 
   let totalPassengers = 0;
 
-  presentBookings.forEach((b) => {
+  presentBookings.forEach((b) => {    //calcule le nombre de passagers presents 
     totalPassengers += b.seatsBooked;
   });
 
-  const finalPricePerSeat = Math.floor(ride.totalCost / (totalPassengers + 1));
-
+  const finalPricePerSeat = Math.floor(ride.totalCost / (totalPassengers + 1)); //calcule le prix final par place
+                                                          // +1 cest le conducteur qui partage aussi le cout
   for (const booking of presentBookings) {
     const finalAmount = finalPricePerSeat * booking.seatsBooked;
 
-    await stripe.paymentIntents.capture(booking.paymentIntentId, {
+    await stripe.paymentIntents.capture(booking.paymentIntentId, {   //capturer le montant final pour chaque passager présent
       amount_to_capture: finalAmount,
     });
 
-    booking.status = "captured";
+    booking.status = "captured";   //enregistrer le montant final
     booking.finalAmount = finalAmount;
     await booking.save();
   }
@@ -270,11 +248,11 @@ async function captureRidePaymentsForPresentPassengers(rideId) {
 // ======================
 //
 
-exports.createRide = async (req, res) => {
+exports.createRide = async (req, res) => {   //Crée un trajet
   console.time("create-ride");
 
   try {
-    const {
+    const {   //on récupère tout ce qu’il faut
       token,
       departureAddress,
       destinationAddress,
@@ -289,17 +267,7 @@ exports.createRide = async (req, res) => {
       availableSeats,
     } = req.body;
 
-    console.log("CREATE RIDE => departureDateTime reçu =", departureDateTime);
-    console.log(
-      "CREATE RIDE => departureDateTime parsé =",
-      departureDateTime ? new Date(departureDateTime) : null
-    );
-    console.log(
-      "CREATE RIDE => departureDateTime ISO =",
-      departureDateTime ? new Date(departureDateTime).toISOString() : null
-    );
-
-    if (
+    if (  //on verifie les champs obligatoires
       !token ||
       !departureAddress ||
       !destinationAddress ||
@@ -313,40 +281,19 @@ exports.createRide = async (req, res) => {
       return res.json({ result: false, error: "Champs manquants." });
     }
 
-    const user = await User.findOne({ token });
+    const user = await User.findOne({ token });  //on retrouve l utilisateur car le trajet doit être relié à un conducteur
 
     if (!user) {
       console.timeEnd("create-ride");
       return res.json({ result: false, error: "User introuvable" });
     }
 
-    const seats = Math.max(Number(availableSeats) || 1, 1);
-    const priceValue = Math.max(Number(price) || 0, 0);
+    const seats = Math.max(Number(availableSeats) || 1, 1); //au moins une place
+    const priceValue = Math.max(Number(price) || 0, 0); //pas de prix negatif
 
-    const parsedDepartureDate = new Date(departureDateTime);
+    const parsedDepartureDate = new Date(departureDateTime);  //analyse la représentation sous forme de chaîne de caractères d'une date et renvoie l'horodatage correspondant
 
-    console.log("CREATE RIDE => parsedDepartureDate =", parsedDepartureDate);
-    console.log(
-      "CREATE RIDE => parsedDepartureDate ISO =",
-      Number.isNaN(parsedDepartureDate.getTime())
-        ? "invalid date"
-        : parsedDepartureDate.toISOString()
-    );
-    console.log(
-      "CREATE RIDE => parsedDepartureDate locale FR =",
-      Number.isNaN(parsedDepartureDate.getTime())
-        ? "invalid date"
-        : parsedDepartureDate.toLocaleString("fr-FR", {
-            timeZone: "Europe/Paris",
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-    );
-
-    const newRide = new Ride({
+    const newRide = new Ride({  //cree le trajet
       user: user._id,
       departureAddress,
       destinationAddress,
@@ -366,16 +313,8 @@ exports.createRide = async (req, res) => {
 
     const savedRide = await newRide.save();
 
-    console.log("CREATE RIDE => savedRide.departureDateTime =", savedRide.departureDateTime);
-    console.log(
-      "CREATE RIDE => savedRide.departureDateTime ISO =",
-      savedRide.departureDateTime
-        ? new Date(savedRide.departureDateTime).toISOString()
-        : null
-    );
-
-    const populated = await Ride.findById(savedRide._id).populate(
-      "user",
+    const populated = await Ride.findById(savedRide._id).populate(  //recharger avec populate
+      "user",                                                //pour renvoyer un objet enrichi au frontend
       "prenom nom firstname lastname profilePhoto car"
     );
 
@@ -398,7 +337,7 @@ exports.createRide = async (req, res) => {
 // ======================
 //
 
-exports.getDriverTrips = async (req, res) => {
+exports.getDriverTrips = async (req, res) => {   //recuperer les trajets du conducteur
   console.time("driver-trips");
 
   try {
@@ -448,6 +387,7 @@ exports.getDriverTrips = async (req, res) => {
     return res.status(500).json({ result: false, error: "Erreur serveur" });
   }
 };
+//c est bien comme ca le frontend conducteur recoit directement les trajets, les passagers et le statut du demarrage possible,, pas ebsoind e refaire les calculs
 
 //
 // ======================
@@ -455,7 +395,7 @@ exports.getDriverTrips = async (req, res) => {
 // ======================
 //
 
-exports.getPassengerBookings = async (req, res) => {
+exports.getPassengerBookings = async (req, res) => {   //recup les resa du passager
   console.time("passenger-bookings");
 
   try {
@@ -517,7 +457,6 @@ exports.getPassengerBookings = async (req, res) => {
       })
       .filter(Boolean);
 
-    console.log("PASSENGER BOOKINGS COUNT =", result.length);
     console.timeEnd("passenger-bookings");
 
     return res.json({ result: true, bookings: result });
@@ -531,14 +470,13 @@ exports.getPassengerBookings = async (req, res) => {
     });
   }
 };
+//structure spécifique pour le passager, car il a besoin de voir non seulement sa réservation, mais aussi le trajet, le conducteur et l’état courant du déplacement
 
-//
-// ======================
+
+
 // ACTIONS PASSAGER
-// ======================
-//
-
-async function updatePresence(bookingId, status) {
+ 
+async function updatePresence(bookingId, status) {  //Mettre à jour le statut de présence d’un passager
   const booking = await Booking.findById(bookingId).populate("ride");
 
   if (!booking) {
@@ -549,13 +487,14 @@ async function updatePresence(bookingId, status) {
   booking.scannedAt = status === "scanned" ? new Date() : null;
   booking.manualValidatedAt = status === "manual" ? new Date() : null;
   booking.absentMarkedAt = status === "absent" ? new Date() : null;
-
+//au lieu de faire 3 fois le même code, je fais une seule fonction commune
   await booking.save();
 
   return booking;
 }
 
-exports.scanPassengerBooking = async (req, res) => {
+
+exports.scanPassengerBooking = async (req, res) => {  //met le statut a scanned
   try {
     const booking = await updatePresence(req.params.bookingId, "scanned");
     return res.json({ result: true, booking });
@@ -564,7 +503,8 @@ exports.scanPassengerBooking = async (req, res) => {
   }
 };
 
-exports.validatePassengerManually = async (req, res) => {
+
+exports.validatePassengerManually = async (req, res) => {   //met le statut a manual
   try {
     const booking = await updatePresence(req.params.bookingId, "manual");
     return res.json({ result: true, booking });
@@ -573,7 +513,8 @@ exports.validatePassengerManually = async (req, res) => {
   }
 };
 
-exports.markPassengerAbsent = async (req, res) => {
+
+exports.markPassengerAbsent = async (req, res) => {   //met le statut a absent
   try {
     const booking = await updatePresence(req.params.bookingId, "absent");
     return res.json({ result: true, booking });
@@ -582,29 +523,26 @@ exports.markPassengerAbsent = async (req, res) => {
   }
 };
 
-//
-// ======================
-// START RIDE
-// ======================
-//
 
-exports.startRide = async (req, res) => {
+// START RIDE
+
+exports.startRide = async (req, res) => {   //demarre un trajet
   console.time("start-ride");
 
   try {
-    const ride = await Ride.findById(req.params.id);
+    const ride = await Ride.findById(req.params.id); //trouve le trajet
 
     if (!ride) {
       console.timeEnd("start-ride");
       return res.json({ result: false });
     }
 
-    const bookings = await Booking.find({
+    const bookings = await Booking.find({  //recup les bookings actifs
       ride: ride._id,
       status: { $in: ["authorized", "captured"] },
     });
 
-    const ready =
+    const ready =   //vérifie si tous les passagers ont été traités
       bookings.length > 0 &&
       bookings.every((b) =>
         ["scanned", "manual", "absent"].includes(b.passengerPresenceStatus)
@@ -618,11 +556,11 @@ exports.startRide = async (req, res) => {
       });
     }
 
-    const paymentSummary = await captureRidePaymentsForPresentPassengers(
+    const paymentSummary = await captureRidePaymentsForPresentPassengers(  //capture les paiements
       ride._id
     );
 
-    ride.status = "started";
+    ride.status = "started";   //passer le trajet à started
     await ride.save();
 
     console.timeEnd("start-ride");
@@ -639,13 +577,10 @@ exports.startRide = async (req, res) => {
   }
 };
 
-//
-// ======================
-// CANCEL RIDE
-// ======================
-//
 
-exports.cancelRide = async (req, res) => {
+// CANCEL RIDE
+
+exports.cancelRide = async (req, res) => {   //Permet au conducteur d’annuler un trajet à venir
   console.time("cancel-ride");
 
   try {
@@ -707,10 +642,6 @@ exports.cancelRide = async (req, res) => {
             });
           }
         } catch (stripeError) {
-          console.log(
-            "Erreur Stripe annulation trajet conducteur =",
-            stripeError.message
-          );
         }
       }
 
@@ -761,14 +692,13 @@ exports.cancelRide = async (req, res) => {
     });
   }
 };
+// gère l’annulation de bout en bout : statut trajet, statut resa, paiement et communication
 
-//
-// ======================
-// UPDATE LOCATION
-// ======================
-//
 
-exports.updateRideLocation = async (req, res) => {
+
+// UPDATE LOCATION 
+
+exports.updateRideLocation = async (req, res) => {  //met à jour la position du conducteur pendant le trajet
   console.time("update-ride-location");
 
   try {
