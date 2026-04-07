@@ -73,9 +73,7 @@ router.get("/unread-count/:token", async (req, res) => {   //Renvoyer le nombre 
   }
 });
 
-router.get("/:conversationId/:token", async (req, res) => {   //Récupérer tous les messages d’une conversation pour un utilisateur donné
-                                              //Et en même temps, marquer comme lus les messages qu’il vient d’ouvrir
-
+router.get("/:conversationId/:token", async (req, res) => {
   try {
     const user = await User.findOne({ token: req.params.token });
 
@@ -86,16 +84,14 @@ router.get("/:conversationId/:token", async (req, res) => {   //Récupérer tous
     const conversation = await Conversation.findById(req.params.conversationId);
 
     if (!conversation) {
-      console.timeEnd("messages-get-conversation");
       return res.json({ result: false, error: "Conversation introuvable" });
     }
 
-    const isDriver = String(conversation.driver) === String(user._id);   //déterminer s’il est conducteur ou passager
+    const isDriver = String(conversation.driver) === String(user._id);
     const isPassenger = String(conversation.passenger) === String(user._id);
 
-    if (isDriver) {    //marquer les messages lus côté conducteur
-      await Message.updateMany(
-        
+    if (isDriver) {
+      const result = await Message.updateMany(
         {
           conversation: conversation._id,
           sender: { $ne: user._id },
@@ -106,17 +102,17 @@ router.get("/:conversationId/:token", async (req, res) => {   //Récupérer tous
           $set: { readByDriver: true },
         }
       );
-      console.log("READ UPDATE DRIVER", {
-    conversationId: String(conversation._id),
-    userId: String(user._id),
-    matchedCount: result.matchedCount,
-    modifiedCount: result.modifiedCount,
-  });
-}
-  
 
-    if (isPassenger) {   //marquer les messages lus côté passager
-      await Message.updateMany(
+      console.log("READ UPDATE DRIVER", {
+        conversationId: String(conversation._id),
+        userId: String(user._id),
+        matchedCount: result.matchedCount,
+        modifiedCount: result.modifiedCount,
+      });
+    }
+
+    if (isPassenger) {
+      const result = await Message.updateMany(
         {
           conversation: conversation._id,
           sender: { $ne: user._id },
@@ -127,19 +123,20 @@ router.get("/:conversationId/:token", async (req, res) => {   //Récupérer tous
           $set: { readByPassenger: true },
         }
       );
-    console.log("READ UPDATE PASSENGER", {
-    conversationId: String(conversation._id),
-    userId: String(user._id),
-    matchedCount: result.matchedCount,
-    modifiedCount: result.modifiedCount,
-  });
-}
+
+      console.log("READ UPDATE PASSENGER", {
+        conversationId: String(conversation._id),
+        userId: String(user._id),
+        matchedCount: result.matchedCount,
+        modifiedCount: result.modifiedCount,
+      });
+    }
 
     const allMessages = await Message.find({
       conversation: conversation._id,
-    }).sort({ createdAt: 1 });   //récup les messages du plus ancien au plus récent
+    }).sort({ createdAt: 1 });
 
-    const filteredMessages = allMessages.filter((message) => {   //filtre selon visibleTo, renvoie que les messages visibles par cet utilisateur
+    const filteredMessages = allMessages.filter((message) => {
       if (message.visibleTo === "both") return true;
 
       if (
@@ -158,7 +155,6 @@ router.get("/:conversationId/:token", async (req, res) => {   //Récupérer tous
 
       return false;
     });
-
 
     return res.json({ result: true, messages: filteredMessages });
   } catch (error) {
