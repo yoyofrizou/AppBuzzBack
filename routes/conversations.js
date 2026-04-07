@@ -53,17 +53,23 @@ router.get("/:token", async (req, res) => {   //récup toutes les conversations 
           String(conversation.passenger?._id || conversation.passenger) ===  //si c’est le passager → regarder readByPassenger
           String(user._id);
 
-        const unreadMessage = await Message.findOne({   //Cherche un message non lu dans cette conversation, envoye par qq un d'autre donc et pas encore lu par l'utilisateur
-          conversation: conversation._id,
-          sender: { $ne: user._id },
-          ...(isDriver ? { readByDriver: false } : {}),   
-          ...(isPassenger ? { readByPassenger: false } : {}),  
-        }).select("_id");
+    const unreadCount = await Message.countDocuments({
+  conversation: conversation._id,
+  sender: { $ne: user._id },
+  ...(isDriver ? { readByDriver: false } : {}),
+  ...(isPassenger ? { readByPassenger: false } : {}),
+  $or: [
+    { visibleTo: "both" },
+    ...(isDriver ? [{ visibleTo: "driver_only" }] : []),
+    ...(isPassenger ? [{ visibleTo: "passenger_only" }] : []),
+  ],
+});
 
-        return {      //ajoutes une info simple au frontend : true s'il y a du non lu et false sinon
-          ...conversation,
-          hasUnread: !!unreadMessage,
-        };
+return {
+  ...conversation,
+  hasUnread: unreadCount > 0,
+  unreadCount,
+};
       })
     );
 

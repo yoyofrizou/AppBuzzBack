@@ -95,6 +95,7 @@ router.get("/:conversationId/:token", async (req, res) => {   //Récupérer tous
 
     if (isDriver) {    //marquer les messages lus côté conducteur
       await Message.updateMany(
+        
         {
           conversation: conversation._id,
           sender: { $ne: user._id },
@@ -105,7 +106,14 @@ router.get("/:conversationId/:token", async (req, res) => {   //Récupérer tous
           $set: { readByDriver: true },
         }
       );
-    }
+      console.log("READ UPDATE DRIVER", {
+    conversationId: String(conversation._id),
+    userId: String(user._id),
+    matchedCount: result.matchedCount,
+    modifiedCount: result.modifiedCount,
+  });
+}
+  
 
     if (isPassenger) {   //marquer les messages lus côté passager
       await Message.updateMany(
@@ -119,7 +127,13 @@ router.get("/:conversationId/:token", async (req, res) => {   //Récupérer tous
           $set: { readByPassenger: true },
         }
       );
-    }
+    console.log("READ UPDATE PASSENGER", {
+    conversationId: String(conversation._id),
+    userId: String(user._id),
+    matchedCount: result.matchedCount,
+    modifiedCount: result.modifiedCount,
+  });
+}
 
     const allMessages = await Message.find({
       conversation: conversation._id,
