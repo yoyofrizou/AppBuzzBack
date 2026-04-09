@@ -26,13 +26,12 @@ router.get("/", async (req, res) => {
 });
 
 router.get("/unread-count/:token", async (req, res) => {   //Renvoyer le nombre de conversations contenant au moins un message non lu pour cet utilisateur
-  console.time("messages-unread-count");                   //compteur de conversations ayant du non lu
+                //compteur de conversations ayant du non lu
 
   try {
     const user = await User.findOne({ token: req.params.token }).select("_id");
 
     if (!user) {
-      console.timeEnd("messages-unread-count");
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
@@ -73,45 +72,39 @@ router.get("/unread-count/:token", async (req, res) => {   //Renvoyer le nombre 
   }
 });
 
-router.get("/:conversationId/:token", async (req, res) => {
+router.get("/:conversationId/:token", async (req, res) => {  //Elle fait 2 choses en une seule requête : Elle fait 2 choses en une seule requête et elle marque comme lus les messages que l’utilisateur vient de consulter
   try {
     const user = await User.findOne({ token: req.params.token });
 
-    if (!user) {
+    if (!user) { //Si le token est faux ou expiré, on arrête tout.
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
-    const conversation = await Conversation.findById(req.params.conversationId);
+    const conversation = await Conversation.findById(req.params.conversationId); //On récupère la conversation demandée.
 
-    if (!conversation) {
+    if (!conversation) { //Si l’ID de conversation n’existe pas, on renvoie une erreur.
       return res.json({ result: false, error: "Conversation introuvable" });
     }
 
-    const isDriver = String(conversation.driver) === String(user._id);
+    //On détermine le rôle de l’utilisateur dans cette conversation
+    const isDriver = String(conversation.driver) === String(user._id);  //on convertit en string car parfois c est un objectId, un objet popule...
     const isPassenger = String(conversation.passenger) === String(user._id);
 
-    if (isDriver) {
-      const result = await Message.updateMany(
-        {
-          conversation: conversation._id,
-          sender: { $ne: user._id },
-          readByDriver: false,
-          $or: [{ visibleTo: "both" }, { visibleTo: "driver_only" }],
+    if (isDriver) { //On entre ici si l’utilisateur connecté est le conducteur de cette conversation
+      const result = await Message.updateMany( //“Mets à jour tous les messages qui correspondent à ces règles.”
+        { //“Je veux tous les messages :
+          conversation: conversation._id, //de cette conversation
+          sender: { $ne: user._id }, //envoyes par qq un d'autre
+          readByDriver: false, //pas encore lus par le conducteur
+          $or: [{ visibleTo: "both" }, { visibleTo: "driver_only" }], //et visibles par le conducteur
         },
         {
-          $set: { readByDriver: true },
+          $set: { readByDriver: true }, //“Pour tous ces messages, je passe readByDriver à true.”
         }
       );
-
-      console.log("READ UPDATE DRIVER", {
-        conversationId: String(conversation._id),
-        userId: String(user._id),
-        matchedCount: result.matchedCount,
-        modifiedCount: result.modifiedCount,
-      });
     }
 
-    if (isPassenger) {
+    if (isPassenger) { //si l utilisateur est passager
       const result = await Message.updateMany(
         {
           conversation: conversation._id,
@@ -123,27 +116,20 @@ router.get("/:conversationId/:token", async (req, res) => {
           $set: { readByPassenger: true },
         }
       );
-
-      console.log("READ UPDATE PASSENGER", {
-        conversationId: String(conversation._id),
-        userId: String(user._id),
-        matchedCount: result.matchedCount,
-        modifiedCount: result.modifiedCount,
-      });
     }
 
-    const allMessages = await Message.find({
+    const allMessages = await Message.find({ //On récupère tous les messages de la conversation, triés du plus ancien au plus récent.
       conversation: conversation._id,
     }).sort({ createdAt: 1 });
 
-    const filteredMessages = allMessages.filter((message) => {
-      if (message.visibleTo === "both") return true;
+    const filteredMessages = allMessages.filter((message) => { //On ne veut pas forcément montrer tous les messages, certains sont pour tous d'autres juste pour le passager etc...
+      if (message.visibleTo === "both") return true; 
 
       if (
         message.visibleTo === "driver_only" &&
         String(conversation.driver) === String(user._id)
       ) {
-        return true;
+        return true; //Si le message est visible seulement conducteur, on le garde uniquement si l’utilisateur courant est bien ce conducteur.
       }
 
       if (
@@ -153,10 +139,11 @@ router.get("/:conversationId/:token", async (req, res) => {
         return true;
       }
 
-      return false;
+      return false; //Sinon, on cache le message.
+      //le front ne reçoit que les messages que l’utilisateur a le droit de voir
     });
 
-    return res.json({ result: true, messages: filteredMessages });
+    return res.json({ result: true, messages: filteredMessages }); //la liste propre des messages visibles
   } catch (error) {
     console.error("GET /messages/:conversationId/:token ERROR =", error);
     return res.json({ result: false, error: error.message });
@@ -164,25 +151,24 @@ router.get("/:conversationId/:token", async (req, res) => {
 });
 
 router.post("/add", async (req, res) => {   //Ajouter un nouveau message utilisateur dans une conversation
-  console.time("messages-add");
 
   try {
     const { token, conversationId, content } = req.body;   //récupérer les champs
 
     if (!token || !conversationId || !content || !content.trim()) {   //valider les champs
-      console.timeEnd("messages-add");
+  
       return res.json({ result: false, error: "Champs manquants" });
     }
 
     const user = await User.findOne({ token });
     if (!user) {
-      console.timeEnd("messages-add");
+  
       return res.json({ result: false, error: "Utilisateur non trouvé" });
     }
 
     const conversation = await Conversation.findById(conversationId);
     if (!conversation) {
-      console.timeEnd("messages-add");
+   
       return res.json({ result: false, error: "Conversation introuvable" });
     }
 
@@ -204,12 +190,11 @@ router.post("/add", async (req, res) => {   //Ajouter un nouveau message utilisa
     conversation.lastMessageAt = new Date();
     await conversation.save();
 
-    console.timeEnd("messages-add");
+  
 
     return res.json({ result: true, message: newMessage });
   } catch (error) {
     console.error("POST /messages/add ERROR =", error);
-    console.timeEnd("messages-add");
     return res.json({ result: false, error: error.message });
   }
 });

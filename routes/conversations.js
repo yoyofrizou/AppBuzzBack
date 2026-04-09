@@ -53,22 +53,27 @@ router.get("/:token", async (req, res) => {   //récup toutes les conversations 
           String(conversation.passenger?._id || conversation.passenger) ===  //si c’est le passager → regarder readByPassenger
           String(user._id);
 
-    const unreadCount = await Message.countDocuments({
-  conversation: conversation._id,
-  sender: { $ne: user._id },
-  ...(isDriver ? { readByDriver: false } : {}),
+    const unreadCount = await Message.countDocuments({ //“Dans cette conversation, est-ce que l’utilisateur a encore des messages non lus ?”
+                                             //On veut savoir si la conversation doit afficher un point rouge.
+                                            //compte combien de messages correspondent aux règles qu’on va mettre
+                                            //await = on attend la réponse de MongoDB
+                                           // Message = le modèle Mongo des messages
+                                           //unreadCount = le nombre de messages non lus trouvés
+  conversation: conversation._id, //“Je veux compter les messages qui appartiennent à cette conversation précise.”
+  sender: { $ne: user._id }, //$ne veut dire not equal = “différent de” donc “Je ne veux compter que les messages envoyés par quelqu’un d’autre.”
+  ...(isDriver ? { readByDriver: false } : {}), //Si l’utilisateur actuel est le conducteur, alors je ne garde que les messages dont readByDriver vaut false
   ...(isPassenger ? { readByPassenger: false } : {}),
-  $or: [
+  $or: [ //“Je garde les messages qui respectent au moins UNE des conditions suivantes.”
     { visibleTo: "both" },
-    ...(isDriver ? [{ visibleTo: "driver_only" }] : []),
+    ...(isDriver ? [{ visibleTo: "driver_only" }] : []), //Si l’utilisateur est le conducteur, alors j’ajoute aussi les messages visibles seulement par le conducteur, par ex message systeme.
     ...(isPassenger ? [{ visibleTo: "passenger_only" }] : []),
   ],
 });
 
-return {
-  ...conversation,
-  hasUnread: unreadCount > 0,
-  unreadCount,
+return { //On renvoie un objet enrichi
+  ...conversation, //toutes les propriétés de la conversation déjà existante, id, driver, etc...
+  hasUnread: unreadCount > 0, //boleen : si unreadCount = 0 → hasUnread = false
+  unreadCount, //On renvoie aussi le nombre exact, ca peut servir plus tard
 };
       })
     );

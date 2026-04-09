@@ -84,13 +84,16 @@ router.post("/test-create", async (req, res) => {   //Route de test pour créer 
   }
 });
 
-router.post("/register", async (req, res) => {
+router.post("/register", async (req, res) => { //créer un nouvel utilisateur, vérifier ses infos, uploader sa photo de profil, enregistrer l’utilisateur en base, puis renvoyer ses infos + son token.
+  //donc pas qu une creation , gere les validations, le hash du MDP, l'upload cloudinary, l'initialisation du profil
   const photoPath = `/tmp/${uniqid()}.jpg`;   //prépares un chemin temporaire unique pour stocker la photo reçue
-        //je dois d’abord recevoir le fichier localement avant de l’envoyer à Cloudinary
-  try {
+        //je dois d’abord recevoir le fichier par le front localement, le stocker temporairement avant de l’envoyer à Cloudinary puis le supprimer
+  // /tmp/ dossier temporaire et uniqid() génère un identifiant unique
+        try {
 
     if (
-      !checkBody(req.body, [  //vérifies que tous les champs nécessaires sont là
+      !checkBody(req.body, [  // checkbody fonction utilitaire qui vérifie que les champs demandés existent et ne sont pas vides, l objet a verif c est le req.body
+       // ! ca veut dire si la verif echoue
         "prenom",
         "nom",
         "email",
@@ -109,12 +112,13 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    if (!req.files || !req.files.profilePhoto) {   //rends la photo obligatoire
+    if (!req.files || !req.files.profilePhoto) {   //req.files c est la ou les fichiers sont uploades grace a express-fileupload, rends la photo obligatoire
       return res.json({ result: false, error: "Photo de profil obligatoire." });
+    //Si aucun fichier n’a été envoyé, ou si profilePhoto n’existe pas, on bloque
     }
 
     const existingUser = await User.findOne({
-      $or: [
+      $or: [ //au moins une des conditions suivantes
         { email: req.body.email.trim().toLowerCase() },
         { telephone: req.body.telephone.trim() },
       ],    //cherches un doublon par email ou téléphone et bloque au cas ou
@@ -125,21 +129,22 @@ router.post("/register", async (req, res) => {
     }
 
     const hash = bcrypt.hashSync(req.body.password, 10); //hashe le mot de passe
-    
+    //bcrypt = librairie pour hasher les MDP, donc transforme le brut en version securisee
 
-    await req.files.profilePhoto.mv(photoPath);
-    const resultCloudinary = await cloudinary.uploader.upload(photoPath);
-    fs.unlinkSync(photoPath);
+    await req.files.profilePhoto.mv(photoPath); //fichier recu et mv = Déplace / enregistre le fichier sur le serveur à l’endroit photoPath car cloudinary a besoin d un fichier ou chemin a upload
+    const resultCloudinary = await cloudinary.uploader.upload(photoPath); //result : Cloudinary renvoie un objet avec plein d’infos, par exemple : URL, secure_URL, public+id et dimensions et je m en sers ensuite pour prendre resultCloudinary.secure_url
+    //Upload de l’image
+    fs.unlinkSync(photoPath); //fs : Le module file system de Node et unlinkSync : Supprime le fichier local car c est bon une fois que c est sur cloudinary
    //flow image : je reçois le fichier, l enregistre temporairement, l'envoie sur cloudinary et la supp du fichier local 
 
-    const newUser = new User({
+    const newUser = new User({ //nouveau docu user et je nettoie les champs du body, pas d'espace etc
       prenom: req.body.prenom.trim(),
       nom: req.body.nom.trim(),
       email: req.body.email.trim().toLowerCase(),
       telephone: req.body.telephone.trim(),
       password: hash,
       token: uid2(32),    //génères un token utilisateur pour identifier le user dans les futurs appels
-      profilePhoto: resultCloudinary.secure_url,  //enregistres l’URL finale Cloudinary
+      profilePhoto: resultCloudinary.secure_url,  //stockes l’URL HTTPS Cloudinary finale de l’image
       stripeCustomerId: null,
       defaultPaymentMethodId: null,
       car: null,
@@ -187,10 +192,12 @@ router.post("/login", async (req, res) => {
     }
 
     const data = await User.findOne({   //cherche l’utilisateur par email normalisé
+      //si trouvé → data = user sinon → data = null
       email: req.body.email.trim().toLowerCase(),
     });
 
-    if (data && bcrypt.compareSync(req.body.password, data.password)) {    //compare le mot de passe saisi avec le hash enregistré
+    if (data && bcrypt.compareSync(req.body.password, data.password)) {  //compare le mot de passe saisi avec le hash enregistré
+      //bcrypt.compareSync = compare mot de passe entré (plaintext) et mot de passe en base (hash)
       res.json({     //renvoie les infos nécessaires au frontend
         result: true,
         token: data.token,

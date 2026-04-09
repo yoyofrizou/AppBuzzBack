@@ -696,46 +696,42 @@ exports.cancelRide = async (req, res) => {   //Permet au conducteur d’annuler 
 
 
 
-// UPDATE LOCATION 
+// UPDATE LOCATION : PATCh comme PUT mais pour mettre à jour PARTIELLEMENT une ressource
 
 exports.updateRideLocation = async (req, res) => {  //met à jour la position du conducteur pendant le trajet
-  console.time("update-ride-location");
+  //exportes une fonction contrôleur
 
   try {
-    const { id } = req.params;
-    const { token, latitude, longitude } = req.body;
+    const { id } = req.params;   //’id du trajet (/rides/:id)
+    const { token, latitude, longitude } = req.body; //’id du trajet (/rides/:id
 
-    const user = await User.findOne({ token }).select("_id");
-
+    const user = await User.findOne({ token }).select("_id"); //cherches l’utilisateur avec le token
+                                         //récupères seulement l’id pas tout l'objet user
     if (!user) {
-      console.timeEnd("update-ride-location");
       return res.status(404).json({
         result: false,
         error: "Utilisateur introuvable",
       });
     }
 
-    const ride = await Ride.findOne({
-      _id: id,
-      user: user._id,
-    });
+    const ride = await Ride.findOne({ //2 vérifications en une seule requête :
+      _id: id,  //  bon trajet
+      user: user._id,  //appartient a cet utilisateur
+    });    //personne ne peut modifier le trajet d’un autre
 
-    if (!ride || ride.status !== "started") {
-      console.timeEnd("update-ride-location");
-      return res.status(400).json({ result: false });
+    if (!ride || ride.status !== "started") { //trajet inexistant ou pas à lui || trajet pas encore commencé
+      return res.status(400).json({ result: false }); //on ne met à jour la position QUE pendant le trajet
     }
 
-    ride.currentLatitude = latitude;
+    ride.currentLatitude = latitude; //modif de ces 3 champs seulement 
     ride.currentLongitude = longitude;
     ride.locationUpdatedAt = new Date();
 
     await ride.save();
 
-    console.timeEnd("update-ride-location");
     return res.json({ result: true, ride });
   } catch (error) {
     console.error("UPDATE RIDE LOCATION ERROR =", error);
-    console.timeEnd("update-ride-location");
     return res.status(500).json({ result: false, error: error.message });
   }
 };
