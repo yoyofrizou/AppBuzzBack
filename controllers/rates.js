@@ -111,7 +111,6 @@ exports.rateDriver = async (req, res) => {   //pour qu'un passager note un condu
 exports.ratePassengers = async (req, res) => {
   try {
     const { rideId, token, ratings } = req.body;
-    ratings = [{ passengerId, rating, comment }]   //Au lieu de faire une route par passager, j'ai prévu un tableau de notes
 
     if (!rideId || !token || !Array.isArray(ratings) || ratings.length === 0) {   //vérifie qu’il y a bien au moins une évaluation
       return res.json({

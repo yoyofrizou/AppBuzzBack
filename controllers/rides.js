@@ -227,12 +227,47 @@ async function captureRidePaymentsForPresentPassengers(rideId) { //gère la part
 
   const finalPricePerSeat = Math.floor(ride.totalCost / (totalPassengers + 1)); //calcule le prix final par place
                                                           // +1 cest le conducteur qui partage aussi le cout
-  for (const booking of presentBookings) {
+  
+  
+for (const booking of presentBookings) {
+  const finalAmount = finalPricePerSeat * booking.seatsBooked;
+
+  console.log("BOOKING ID =", booking._id);
+  console.log("BOOKING STATUS =", booking.status);
+  console.log("BOOKING paymentIntentId =", booking.paymentIntentId);
+  console.log("FINAL AMOUNT =", finalAmount);
+
+  if (!booking.paymentIntentId) {
+    throw new Error(`paymentIntentId manquant pour le booking ${booking._id}`);
+  }
+
+  const paymentIntent = await stripe.paymentIntents.retrieve(
+    booking.paymentIntentId
+  );
+
+  console.log("STRIPE paymentIntent trouvé =", paymentIntent.id);
+  console.log("STRIPE status =", paymentIntent.status);
+
+  await stripe.paymentIntents.capture(booking.paymentIntentId, {
+    amount_to_capture: finalAmount,
+  });
+
+  booking.status = "captured";
+  booking.finalAmount = finalAmount;
+  await booking.save();
+}
+return { finalPricePerSeat, countedPassengers: totalPassengers };
+}
+
+
+/*for (const booking of presentBookings) {
     const finalAmount = finalPricePerSeat * booking.seatsBooked;
 
-    await stripe.paymentIntents.capture(booking.paymentIntentId, {   //capturer le montant final pour chaque passager présent
+    await stripe.paymentIntents.capture(booking.paymentIntentId, {
+        //capturer le montant final pour chaque passager présent
       amount_to_capture: finalAmount,
     });
+   console.log("paymentIntentId:", booking.paymentIntentId);
 
     booking.status = "captured";   //enregistrer le montant final
     booking.finalAmount = finalAmount;
@@ -240,7 +275,7 @@ async function captureRidePaymentsForPresentPassengers(rideId) { //gère la part
   }
 
   return { finalPricePerSeat, countedPassengers: totalPassengers };
-}
+} */
 
 //
 // ======================
